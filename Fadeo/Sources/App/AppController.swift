@@ -104,6 +104,31 @@ final class AppController: ObservableObject {
         return configStore.config.workspaces.first { $0.id == id }?.name
     }
 
+    // MARK: Sensor status (for the Triggers pane)
+
+    struct SensorStatus: Identifiable {
+        let id: String
+        let name: String
+        let running: Bool
+        let fields: [String]
+    }
+
+    var sensorStatuses: [SensorStatus] {
+        let names: [(String, String)] = [
+            ("AppFocusSensor", "App Focus"), ("SpaceSensor", "Desktop / Space"),
+            ("MeetingSensor", "Meeting"), ("FocusSensor", "Focus Mode"), ("ScheduleSensor", "Time / Schedule"),
+        ]
+        return allSensors.enumerated().map { i, sensor in
+            let (_, label) = names[i]
+            return SensorStatus(
+                id: String(describing: type(of: sensor)),
+                name: label,
+                running: runningSensors.contains(ObjectIdentifier(sensor)),
+                fields: type(of: sensor).providedFields.map(\.rawValue).sorted()
+            )
+        }
+    }
+
     var uptimeString: String {
         let s = Int(Date().timeIntervalSince(startedAt))
         return String(format: "%dh %02dm %02ds", s / 3600, (s % 3600) / 60, s % 60)

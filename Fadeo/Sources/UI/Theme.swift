@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Brand palette, sampled from the logo: teal accent on slate.
 enum Brand {
@@ -23,5 +24,14 @@ extension Color {
             green: Double((v >> 8) & 0xFF) / 255,
             blue: Double(v & 0xFF) / 255
         )
+    }
+
+    /// "#RRGGBB", via NSColor's sRGB conversion (Color has no direct component accessor).
+    func toHexString() -> String {
+        let ns = NSColor(self).usingColorSpace(.sRGB) ?? NSColor(self)
+        let r = Int((ns.redComponent * 255).rounded())
+        let g = Int((ns.greenComponent * 255).rounded())
+        let b = Int((ns.blueComponent * 255).rounded())
+        return String(format: "#%02X%02X%02X", r, g, b)
     }
 }

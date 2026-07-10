@@ -42,7 +42,9 @@ enum Pane: String, CaseIterable, Identifiable {
 
 struct RootView: View {
     @EnvironmentObject var controller: AppController
-    @State private var selection: Pane = .now
+    // Dev/screenshot-verification hook: FADEO_INITIAL_PANE=<rawValue> jumps straight to a
+    // pane at launch without needing UI-click automation. Never set in the shipped app.
+    @State private var selection: Pane = Pane(rawValue: ProcessInfo.processInfo.environment["FADEO_INITIAL_PANE"] ?? "") ?? .now
 
     var body: some View {
         // Pin the sidebar open (constant visibility) and strip the collapse button below.
@@ -59,6 +61,11 @@ struct RootView: View {
             Group {
                 switch selection {
                 case .now: NowPane()
+                case .workspaces: WorkspacesPane()
+                case .soundLibrary: SoundLibraryPane()
+                case .precedence: PrecedencePane()
+                case .triggers: TriggersPane()
+                case .advanced: AdvancedPane()
                 case .preferences: PreferencesPane()
                 case .about: AboutPane()
                 default: PlaceholderPane(pane: selection)

@@ -165,12 +165,56 @@ far: an `AVAudioEngine` with a real-time render block that *synthesizes* ambient
 (brown/pink/white via `NoiseRenderer`) rather than shipping audio files — no assets, no
 looping seams, tiny footprint. Fades are sample-accurate gain ramps computed on the
 control thread and applied per-sample on the audio thread (benign lock-free races by
-design, worst case a one-sample discontinuity). The engine is fully `stop()`ed (not just
-gain-zeroed) when idle so it drops to ~0% CPU and releases the audio hardware — always
-route "silence" through `Reconciler`'s `.stop` command, don't just ramp volume to zero
-and leave the engine running. External-player conduction (MediaRemote/AppleScript for
-Spotify/Apple Music) doesn't exist yet (planned M2) — `AppController.applyAudio` currently
-intercepts any `external:`-prefixed source and silences instead of pretending to play it.
+design, worst case a one-sample discontinuity). The engine also runs a second,
+independent playback path (`AVAudioPlayerNode` + a dedicated mixer) for real files —
+`internal:file:`/`internal:folder:`/`internal:playlist:` sources — queued per the
+workspace's `order`/`repeatMode`. The two paths are mutually exclusive (only one plays at
+a time) and both fully torn down (`stop()`/`playerNode?.stop()`, not just gain-zeroed)
+when idle. `ExternalConductor` (`Fadeo/Sources/Actuators/`) conducts Spotify/Apple Music
+instead of playing anything itself: generic transport via `Platform/MediaRemoteBridge.swift`
+(dlopen/dlsym against the private MediaRemote framework — works without entitlement for
+*commands*, unlike reading now-playing state which macOS 15.4+ locked down), and
+playlist-targeting + per-app volume baseline via AppleScript
+(`Platform/AppleScriptRunner.swift`). `AppController.applyAudio` tracks which actuator
+(`InternalEngine` vs `ExternalConductor`) currently owns playback via `activeActuator`,
+since `.stop`/`.setVolume` commands don't carry a source string to route by.
+
+## UI: six panes, all live-bound to `ConfigStore`
+
+`Fadeo/Sources/UI/{Workspaces,SoundLibrary,Precedence,Triggers,Advanced}/` implement the
+sidebar panes beyond Now/Preferences/About. All of them edit `AppController.configStore`
+directly and **save immediately on every change** — no separate draft/apply step. This is
+safe because `ConfigStore.save` writes atomically and the FSEvents hot-reload path dedupes
+byte-identical and self-originated writes (see `ConfigStore.reloadFromDisk`), so there's no
+feedback loop. The pattern used throughout: a computed `Binding<T>` that reads
+`controller.configStore.config...` and writes back via `controller.configStore.save(...)`
+after mutating a local copy — see `WorkspacesPane.workspaceBinding` for the canonical
+example.
+
+`SoundEditor` (`UI/Workspaces/SoundEditor.swift`) parses/reconstructs `Sound.source`
+(a single opaque string) into UI-friendly pickers via prefix matching — the model never
+gains a "kind" enum of its own, keeping the serialized format exactly the grammar
+documented in PLAN.md §4.
+
+**Known tradeoff, not a bug:** every GUI edit regenerates the whole `config.yaml` from the
+`Config` model via `ConfigCodec.encode`, which drops any comments a user hand-added — Yams
+doesn't do comment-preserving round-trips through a decoded-then-re-encoded model. The
+`Advanced` pane (raw YAML text editor) is the only surface where comments survive edits.
+This is flagged in the Advanced pane's own UI, not hidden.
+
+**Two dev-only env-var hooks exist purely for screenshot-driving verification without
+fragile UI-click automation** (`AppDelegate.swift`, `RootView.swift`):
+`FADEO_OPEN_MAIN_ON_LAUNCH=1` skips the "close the initial window" step so a headless
+direct-binary launch lands on the main window; `FADEO_INITIAL_PANE=<Pane rawValue>` jumps
+the sidebar straight to a given pane. Neither is read anywhere except at launch, neither
+is set by the shipped app or `make run`/`install` — safe to leave in, trivial to strip
+before a release build if ever desired.
+
+`Sound Library`'s deliberate scope cut: no live audio preview button. Wiring one safely
+would mean bypassing `applyAudio`'s state tracking (`audioState`/`activeActuator`), which
+risks the Now pane and menu bar showing a workspace that isn't what's actually playing.
+Documented as a clean follow-up (a dedicated suppress-evaluation preview mode), not shipped
+half-finished.
 
 ## Efficiency is a hard constraint, not a nice-to-have
 

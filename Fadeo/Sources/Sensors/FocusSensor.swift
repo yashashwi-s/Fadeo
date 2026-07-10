@@ -42,6 +42,10 @@ final class FocusSensor: Sensor {
         emit(ContextPatch(apply: { $0.focusMode = mode }, label: "focus → \(mode ?? "none")"))
     }
 
+    /// One-shot read for the Workspace editor's "use current Focus" button — the UI
+    /// doesn't need a running sensor, just the value at the moment of the click.
+    static func currentModeIdentifierForUI() -> String? { readActiveModeIdentifier() }
+
     private static func readActiveModeIdentifier() -> String? {
         guard let data = try? Data(contentsOf: assertionsFile),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
