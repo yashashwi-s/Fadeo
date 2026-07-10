@@ -218,11 +218,35 @@ struct AboutPane: View {
 
                 Divider().frame(width: 220).padding(.vertical, 6)
                 licenseSection
+
+                Divider().frame(width: 220).padding(.vertical, 6)
+                feedbackSection
             }
             .frame(maxWidth: .infinity)
             .padding(30)
         }
         .navigationTitle("About")
+    }
+
+    private var feedbackSection: some View {
+        VStack(spacing: 6) {
+            Button("Send Feedback or Report a Bug") { openFeedbackEmail() }
+                .buttonStyle(.bordered)
+            Text("Opens your email client, addressed to me directly.")
+                .font(.caption2).foregroundStyle(.tertiary)
+        }
+    }
+
+    private func openFeedbackEmail() {
+        var components = URLComponents()
+        components.scheme = "mailto"
+        components.path = "yashashwisinghania@gmail.com"
+        components.queryItems = [
+            URLQueryItem(name: "subject", value: "Fadeo feedback (v\(version))"),
+        ]
+        if let url = components.url {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     private var licenseSection: some View {
@@ -257,7 +281,7 @@ struct AboutPane: View {
                     }
                 } else {
                     HStack(spacing: 10) {
-                        Button("Buy for $2") {
+                        Button("Support Fadeo") {
                             if let url = URL(string: "https://puremac.yashashwi.me/fadeo") {
                                 NSWorkspace.shared.open(url)
                             }

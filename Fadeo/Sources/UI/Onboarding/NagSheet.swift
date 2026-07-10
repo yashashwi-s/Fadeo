@@ -5,8 +5,9 @@ import FadeoCore
 /// valid license, and only when the user opens the main window themselves (never a
 /// proactive popup, never during a meeting or otherwise interrupting anything, since it
 /// only ever appears alongside a window the user deliberately opened). Two ways to
-/// dismiss it for good: buy the $2 lifetime license, or answer one quick question and
-/// opt into anonymous usage sharing. Never blocks any feature either way.
+/// dismiss it for good: pay what you want for a lifetime license ($2 minimum, no upper
+/// bound, no tier), or answer one quick question and opt into anonymous usage sharing.
+/// Never blocks any feature either way.
 struct NagSheet: View {
     @ObservedObject var licenseManager: LicenseManager
     @Binding var isPresented: Bool
@@ -31,7 +32,7 @@ struct NagSheet: View {
                 Image("AppLogo").resizable().scaledToFit().frame(width: 56, height: 56)
                     .clipShape(RoundedRectangle(cornerRadius: 13))
                 Text("Your Fadeo trial has ended").font(.title3.weight(.semibold))
-                Text("Fadeo keeps working exactly as before. No feature is disabled. If you've found it useful, a lifetime license is $2.")
+                Text("Fadeo keeps working exactly as before. No feature is disabled. If you've found it useful, pay what you want for a lifetime license, $2 minimum.")
                     .font(.callout).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center).frame(maxWidth: 380)
             }
@@ -59,7 +60,7 @@ struct NagSheet: View {
                     NSWorkspace.shared.open(url)
                 }
             } label: {
-                Text("Buy for $2 (lifetime)").frame(maxWidth: .infinity)
+                Text("Pay what you want ($2 min.)").frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
