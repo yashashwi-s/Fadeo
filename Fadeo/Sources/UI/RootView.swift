@@ -70,10 +70,10 @@ struct RootView: View {
     }
 
     private var sidebarFooter: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 7) {
             Circle()
-                .fill(controller.automationPaused ? Color.orange : Brand.teal)
-                .frame(width: 8, height: 8)
+                .fill(Color.secondary.opacity(controller.automationPaused ? 0.4 : 0.8))
+                .frame(width: 7, height: 7)
             Text(controller.automationPaused ? "Paused" : "Active")
                 .font(.caption).foregroundStyle(.secondary)
             Spacer()

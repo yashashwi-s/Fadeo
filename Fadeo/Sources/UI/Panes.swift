@@ -30,6 +30,7 @@ struct NowPane: View {
             VStack(alignment: .leading, spacing: 16) {
                 header
                 Card(title: "Active workspace") { activeWorkspace }
+                Card(title: "Audio") { audio }
                 Card(title: "Why") {
                     Text(controller.decision?.reason.explanation ?? "Evaluating…")
                         .font(.callout)
@@ -47,13 +48,23 @@ struct NowPane: View {
     private var header: some View {
         HStack(spacing: 12) {
             Image(systemName: "waveform")
-                .font(.system(size: 26, weight: .semibold))
-                .foregroundStyle(Brand.teal)
-            VStack(alignment: .leading) {
+                .font(.system(size: 24, weight: .regular))
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
                 Text("Fadeo is watching").font(.title3.weight(.semibold))
-                Text("M0 pipeline: app-focus → context → resolve → decision")
+                Text("app focus, context, resolve, decision")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Spacer()
+        }
+    }
+
+    private var audio: some View {
+        HStack(spacing: 10) {
+            Image(systemName: controller.audioStatus == "silent" ? "speaker.slash" : "speaker.wave.2")
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
+            Text(controller.audioStatus).font(.callout.weight(.medium))
             Spacer()
         }
     }
@@ -62,7 +73,7 @@ struct NowPane: View {
         HStack(spacing: 12) {
             let ws = controller.configStore.config.workspaces.first { $0.id == controller.decision?.activeWorkspace }
             Circle().fill(Brand.swatch(ws?.color)).frame(width: 14, height: 14)
-            Text(ws?.name ?? "—").font(.title2.weight(.medium))
+            Text(ws?.name ?? "None").font(.title2.weight(.medium))
             Spacer()
             if let d = controller.decision {
                 VStack(alignment: .trailing) {
@@ -77,10 +88,10 @@ struct NowPane: View {
 
     private var liveContext: some View {
         Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 8) {
-            row("Frontmost app", controller.context.frontmostApp ?? "—")
-            row("Desktop / Space", controller.context.activeSpace?.index.map { "Desktop \($0)" } ?? "— (M3)")
-            row("In a meeting", controller.context.cameraActive || controller.context.micActive ? "Yes" : "— (M3)")
-            row("Focus mode", controller.context.focusMode ?? "— (M3)")
+            row("Frontmost app", controller.context.frontmostApp ?? "none")
+            row("Desktop / Space", controller.context.activeSpace?.index.map { "Desktop \($0)" } ?? "not yet (M3)")
+            row("In a meeting", controller.context.cameraActive || controller.context.micActive ? "Yes" : "not yet (M3)")
+            row("Focus mode", controller.context.focusMode ?? "not yet (M3)")
         }
     }
 
@@ -177,7 +188,7 @@ struct AboutPane: View {
             Divider().frame(width: 220).padding(.vertical, 6)
             VStack(spacing: 4) {
                 Text("Open source · GPLv3").font(.callout.weight(.medium))
-                Text("Fully functional. A gentle reminder appears until licensed — never a lockout.")
+                Text("Fully functional. A gentle reminder appears until licensed, never a lockout.")
                     .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
             .frame(maxWidth: 360)
@@ -194,7 +205,7 @@ struct PlaceholderPane: View {
     let pane: Pane
     var body: some View {
         VStack(spacing: 12) {
-            Image(systemName: pane.systemImage).font(.system(size: 40)).foregroundStyle(Brand.teal)
+            Image(systemName: pane.systemImage).font(.system(size: 38)).foregroundStyle(.secondary)
             Text(pane.rawValue).font(.title2.weight(.semibold))
             if let m = pane.milestone {
                 Text("Coming in \(m)")

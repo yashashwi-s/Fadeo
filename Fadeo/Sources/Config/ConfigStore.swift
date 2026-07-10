@@ -23,6 +23,7 @@ final class ConfigStore: ObservableObject {
             if FileManager.default.fileExists(atPath: AppPaths.configFile.path) {
                 let data = try Data(contentsOf: AppPaths.configFile)
                 self.config = try ConfigCodec.decode(data)
+                self.lastWrittenData = data
             } else {
                 self.config = .starter
                 let data = try ConfigCodec.encode(.starter)
@@ -48,6 +49,10 @@ final class ConfigStore: ObservableObject {
         if data == lastWrittenData { return }  // our own write echoing back
         do {
             let decoded = try ConfigCodec.decode(data)
+            lastWrittenData = data
+            // Only republish on a genuine change, so unrelated activity in the directory
+            // (or a byte-identical rewrite) never triggers a re-evaluation storm.
+            guard decoded != config else { return }
             config = decoded
             lastError = nil
             lastLoaded = Date()

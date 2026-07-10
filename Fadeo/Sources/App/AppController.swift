@@ -13,11 +13,27 @@ final class AppController: ObservableObject {
     @Published private(set) var decision: Decision?
     @Published private(set) var recentEvents: [String] = []
     @Published private(set) var eventCount: Int = 0
-    @Published var automationPaused = false { didSet { evaluate() } }
+    @Published private(set) var audioStatus: String = "silent"
+    @Published var automationPaused = false {
+        didSet {
+            if automationPaused {
+                engine.execute(.stop(fadeMs: configStore.config.settings.defaults.fadeOutMs))
+                audioState = .silent
+                updateAudioStatus()
+            } else {
+                evaluate()
+            }
+        }
+    }
 
     let configStore: ConfigStore
     private let resolver = Resolver()
     private var resolverState = ResolverState()
+
+    // Audio actuation
+    private let engine = InternalEngine()
+    private let reconciler = Reconciler()
+    private var audioState: AudioState = .silent
 
     // Sensors (only AppFocus in M0; the rest slot in behind the same protocol at M3)
     private let appFocus = AppFocusSensor()
@@ -90,6 +106,47 @@ final class AppController: ObservableObject {
             resolverState.lastActive[ws] = Date()
         } else if d.target.action == .stop || d.target.action == .resumePrevious {
             resolverState.activeWorkspace = nil
+        }
+        applyAudio(d)
+    }
+
+    // MARK: Audio
+
+    private func applyAudio(_ d: Decision) {
+        var target = d.target
+        // M1: external players aren't wired yet (that's M2). Rather than pretend, silence
+        // the internal engine when a rule asks for an external source.
+        if target.action == .play, let s = target.source, s.hasPrefix("external:") {
+            target = AudioTarget(source: nil, action: .stop, volume: 0)
+        }
+
+        let command = reconciler.reconcile(current: audioState, target: target, transition: d.transition)
+        engine.execute(command)
+
+        // Optimistically mirror the command into our tracked state (matches the reconciler's
+        // model, so we don't re-issue the same fade every context tick).
+        switch command {
+        case .start(let s, let v, _), .crossfade(let s, let v, _):
+            audioState = AudioState(source: s, volume: v, playing: true)
+        case .setVolume(let v, _):
+            audioState.volume = v
+        case .stop:
+            audioState = .silent
+        case .none:
+            break
+        }
+        updateAudioStatus()
+    }
+
+    private func updateAudioStatus() {
+        if audioState.playing, let s = audioState.source {
+            let name = s.split(separator: ":").last.map(String.init) ?? s
+            audioStatus = "playing \(name) · \(Int(audioState.volume * 100))%"
+        } else if let d = decision, d.target.action == .play,
+                  let s = d.target.source, s.hasPrefix("external:") {
+            audioStatus = "→ external player (M2)"
+        } else {
+            audioStatus = "silent"
         }
     }
 

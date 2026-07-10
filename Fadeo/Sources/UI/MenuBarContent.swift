@@ -1,8 +1,8 @@
 import SwiftUI
 import FadeoCore
 
-/// The always-present menu-bar companion. Clean, glanceable, minimal: what's active,
-/// what it would do, a pause switch, and quick ways into the app.
+/// The always present menu bar companion. Sober and native: system colors, no tint, no
+/// decoration. The only color is the workspace's own dot, which carries meaning.
 struct MenuBarContent: View {
     @EnvironmentObject var controller: AppController
     @Environment(\.openWindow) private var openWindow
@@ -14,89 +14,68 @@ struct MenuBarContent: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider().opacity(0.6)
+            Divider()
 
-            VStack(spacing: 2) {
-                pauseRow
-            }
-            .padding(.vertical, 4)
+            pauseRow.padding(.vertical, 4)
 
-            Divider().opacity(0.6)
+            Divider()
 
-            VStack(spacing: 2) {
-                MenuRow(icon: "macwindow", title: "Open Fadeo", shortcut: "⌘O") {
+            VStack(spacing: 1) {
+                MenuRow(icon: "macwindow", title: "Open Fadeo") {
                     NSApp.setActivationPolicy(.regular)
                     NSApp.activate(ignoringOtherApps: true)
                     openWindow(id: "main")
                 }
-                MenuRow(icon: "folder", title: "Reveal config") {
+                MenuRow(icon: "folder", title: "Reveal Config") {
                     controller.configStore.revealInFinder()
                 }
             }
             .padding(.vertical, 4)
 
-            Divider().opacity(0.6)
+            Divider()
 
-            MenuRow(icon: "power", title: "Quit Fadeo", tint: .secondary) {
+            MenuRow(icon: "power", title: "Quit Fadeo") {
                 NSApp.terminate(nil)
             }
             .padding(.vertical, 4)
         }
-        .frame(width: 292)
+        .frame(width: 280)
         .padding(.bottom, 4)
     }
 
-    // MARK: Header
-
     private var header: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(spacing: 9) {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 8) {
                 Circle()
-                    .fill(Brand.swatch(activeWorkspace?.color))
-                    .frame(width: 10, height: 10)
-                    .shadow(color: Brand.swatch(activeWorkspace?.color).opacity(0.6), radius: 3)
+                    .fill(activeWorkspace.map { Brand.swatch($0.color) } ?? Color.secondary.opacity(0.5))
+                    .frame(width: 8, height: 8)
                 Text(activeWorkspace?.name ?? "No workspace")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 14, weight: .medium))
                 Spacer()
-                statusPill
+                Text(controller.automationPaused ? "Paused" : "Active")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
             }
-
-            HStack(spacing: 12) {
-                metaItem(icon: "app.dashed", text: appName(controller.context.frontmostApp))
-                metaItem(icon: "waveform", text: actionLabel, tint: Brand.teal)
+            HStack(spacing: 5) {
+                Text(appName(controller.context.frontmostApp))
+                Text("·").foregroundStyle(.tertiary)
+                Text(controller.audioStatus)
             }
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 13)
-        .padding(.bottom, 12)
+        .padding(.horizontal, 13)
+        .padding(.top, 12)
+        .padding(.bottom, 11)
     }
-
-    private var statusPill: some View {
-        let paused = controller.automationPaused
-        return Text(paused ? "PAUSED" : "ACTIVE")
-            .font(.system(size: 9, weight: .bold))
-            .kerning(0.5)
-            .foregroundStyle(paused ? Color.orange : Brand.teal)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background((paused ? Color.orange : Brand.teal).opacity(0.15), in: Capsule())
-    }
-
-    private func metaItem(icon: String, text: String, tint: Color = .secondary) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon).font(.system(size: 10)).foregroundStyle(tint)
-            Text(text).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
-        }
-    }
-
-    // MARK: Pause row
 
     private var pauseRow: some View {
-        HStack(spacing: 10) {
-            Image(systemName: controller.automationPaused ? "pause.circle.fill" : "bolt.fill")
-                .font(.system(size: 14))
-                .foregroundStyle(controller.automationPaused ? Color.orange : Brand.teal)
-                .frame(width: 20)
+        HStack(spacing: 9) {
+            Image(systemName: "bolt")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
             Text("Automation")
                 .font(.system(size: 13))
             Spacer()
@@ -108,69 +87,41 @@ struct MenuBarContent: View {
             .controlSize(.small)
             .labelsHidden()
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 5)
-    }
-
-    // MARK: Helpers
-
-    private var actionLabel: String {
-        guard let t = controller.decision?.target else { return "idle" }
-        switch t.action {
-        case .play: return "\(sourceShort(t.source)) · \(Int(t.volume * 100))%"
-        case .pause: return "paused"
-        case .stop: return "silent"
-        case .resumePrevious: return "resume"
-        case .doNothing: return "holding"
-        default: return "—"
-        }
-    }
-
-    private func sourceShort(_ s: String?) -> String {
-        guard let s else { return "—" }
-        return s.split(separator: ":").last.map(String.init) ?? s
+        .padding(.horizontal, 13)
+        .padding(.vertical, 4)
     }
 
     private func appName(_ bundle: String?) -> String {
-        guard let bundle else { return "—" }
+        guard let bundle else { return "no app" }
         return bundle.split(separator: ".").last.map(String.init) ?? bundle
     }
 }
 
-/// A full-width menu row with a hover highlight — the building block for a clean,
-/// native-feeling `.window`-style MenuBarExtra.
+/// Full width menu row with a neutral hover highlight (system selection tone, not a tint).
 private struct MenuRow: View {
     let icon: String
     let title: String
-    var shortcut: String? = nil
-    var tint: Color = .primary
     let action: () -> Void
-
     @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 10) {
+            HStack(spacing: 9) {
                 Image(systemName: icon)
-                    .font(.system(size: 13))
-                    .foregroundStyle(hovering ? Brand.teal : .secondary)
-                    .frame(width: 20)
-                Text(title)
-                    .font(.system(size: 13))
-                    .foregroundStyle(tint)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18)
+                Text(title).font(.system(size: 13))
                 Spacer()
-                if let shortcut {
-                    Text(shortcut).font(.system(size: 11)).foregroundStyle(.tertiary)
-                }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 13)
+            .padding(.vertical, 5)
             .contentShape(Rectangle())
-            .background(hovering ? Brand.teal.opacity(0.14) : .clear,
-                        in: RoundedRectangle(cornerRadius: 7))
+            .background(hovering ? Color.primary.opacity(0.07) : .clear,
+                        in: RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, 6)
+        .padding(.horizontal, 5)
         .onHover { hovering = $0 }
     }
 }
