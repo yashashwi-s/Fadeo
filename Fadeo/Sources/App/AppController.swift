@@ -69,14 +69,22 @@ final class AppController: ObservableObject {
         scheduleSensor.reschedule(workspaces: configStore.config.workspaces)
 
         // Re-evaluate whenever the config hot-reloads.
+        // @Published fires its publisher from willSet, before the backing storage is
+        // actually updated — reading `configStore.config` synchronously inside this sink
+        // would still see the OLD value (a well-known Combine footgun). Dispatching to the
+        // next run loop turn (still same-frame, imperceptible) ensures reconcileSensors()/
+        // evaluate() — which both read configStore.config directly rather than a passed
+        // parameter, for API simplicity — see the config that's actually now in effect.
         configStore.$config
             .dropFirst()
             .sink { [weak self] cfg in
                 guard let self else { return }
                 self.engine.updateLocalPlaylists(cfg.localPlaylists)
                 self.scheduleSensor.reschedule(workspaces: cfg.workspaces)
-                self.reconcileSensors()
-                self.evaluate()
+                DispatchQueue.main.async {
+                    self.reconcileSensors()
+                    self.evaluate()
+                }
             }
             .store(in: &cancellables)
 
@@ -205,6 +213,29 @@ final class AppController: ObservableObject {
             destination = activeActuator
         case .none:
             destination = activeActuator
+        }
+
+        // If this command is about to hand playback to a DIFFERENT actuator than the one
+        // currently playing, explicitly stop the one being left behind first. The
+        // Reconciler only diffs source strings — it has no notion of actuator identity —
+        // so without this, switching e.g. an internal preset to an external Spotify/Music
+        // source would leave the internal engine running invisibly forever (confirmed as
+        // a real bug: reported as "white noise still playing" after switching a
+        // workspace's source to Apple Music).
+        let isHandoff: Bool
+        switch command {
+        case .start, .crossfade: isHandoff = destination != activeActuator && activeActuator != .none
+        case .none, .setVolume, .stop: isHandoff = false
+        }
+        if isHandoff {
+            let fadeMs = { if case .crossfade = command { return d.transition.timing.crossfadeMs }
+                           return d.transition.timing.fadeOutMs }()
+            let vacate = AudioCommand.stop(fadeMs: fadeMs)
+            switch activeActuator {
+            case .internalEngine: engine.execute(vacate)
+            case .external: external.execute(vacate)
+            case .none: break
+            }
         }
 
         switch destination {

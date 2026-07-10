@@ -58,7 +58,7 @@ final class ConfigStore: ObservableObject {
             lastLoaded = Date()
         } catch {
             // Keep the last-good config; report the problem.
-            lastError = "config.json invalid — keeping last good version. \(error.localizedDescription)"
+            lastError = "config.yaml invalid, keeping last good version. \(error.localizedDescription)"
         }
     }
 
