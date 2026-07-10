@@ -216,6 +216,24 @@ risks the Now pane and menu bar showing a workspace that isn't what's actually p
 Documented as a clean follow-up (a dedicated suppress-evaluation preview mode), not shipped
 half-finished.
 
+## Onboarding and project status
+
+`UI/Onboarding/OnboardingSheet.swift` is a one-screen first-run explanation (not a
+multi-step wizard — today's real permission surface is thin enough that a longer flow
+would be padding). Gated on `OnboardingSheet.hasCompleted` (a `UserDefaults` flag,
+`fadeo.onboarding.completed`); `AppDelegate` keeps the initial window open only on that
+first launch, `RootView` presents the sheet.
+
+**Project status at the M5 milestone: the core app is feature-complete.** M0 through M4
+plus M5's permissions/onboarding and energy dashboard are done (see PLAN.md §17). By
+explicit user decision, monetization (licensing, trial, soft nag, diagnostics),
+notifications, and packaging/notarization are deferred to a later stage — no Apple
+Developer ID exists yet, and licensing is substantial enough surface that it isn't worth
+building before the core product is fully proven. Don't start on licensing/notifications/
+notarization work without the user explicitly asking for it again; it was intentionally
+paused, not forgotten. The app icon/logo is also being redesigned by the user personally —
+don't regenerate `assets/appicon/` or `AppIcon.appiconset` programmatically.
+
 ## Efficiency is a hard constraint, not a nice-to-have
 
 The whole point of the event-driven pipeline above is that Fadeo must be invisible in
