@@ -24,13 +24,11 @@ struct PrecedencePane: View {
                 fallbackCard
                 defaultsCard
                 ConflictSimulator(config: config)
+                resetRow
             }
             .padding(20)
         }
         .navigationTitle("Precedence")
-        .toolbar {
-            Button("Reset to Defaults") { showResetConfirm = true }
-        }
         .confirmationDialog(
             "Reset precedence settings to defaults?",
             isPresented: $showResetConfirm, titleVisibility: .visible
@@ -44,6 +42,20 @@ struct PrecedencePane: View {
         } message: {
             Text("This resets the tiebreak order, fallback, meeting trigger, and global timing defaults. Your workspaces are not affected.")
         }
+    }
+
+    // MARK: Reset
+
+    private var resetRow: some View {
+        HStack {
+            Spacer()
+            Button("Reset precedence settings to defaults\u{2026}") { showResetConfirm = true }
+                .buttonStyle(.plain)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.top, 4)
     }
 
     // MARK: Tiebreak chain
