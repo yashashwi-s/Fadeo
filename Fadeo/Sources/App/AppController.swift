@@ -50,8 +50,15 @@ final class AppController: ObservableObject {
     let systemVolume = SystemVolume()
     @Published var masterVolume: Float = 0.5
 
-    // Sensors (only AppFocus in M0; the rest slot in behind the same protocol at M3)
+    // Sensors — lazily activated: a sensor whose fields no enabled workspace references
+    // is never started (zero observers, zero cost). See requiredFields()/reconcileSensors().
     private let appFocus = AppFocusSensor()
+    private let spaceSensor = SpaceSensor()
+    private let meetingSensor = MeetingSensor()
+    private let focusSensor = FocusSensor()
+    private let scheduleSensor = ScheduleSensor()
+    private lazy var allSensors: [any Sensor] = [appFocus, spaceSensor, meetingSensor, focusSensor, scheduleSensor]
+    private var runningSensors: Set<ObjectIdentifier> = []
 
     // Debounce
     private var pendingEval: DispatchWorkItem?
@@ -63,13 +70,17 @@ final class AppController: ObservableObject {
         self.configStore = configStore
 
         engine.updateLocalPlaylists(configStore.config.localPlaylists)
+        scheduleSensor.reschedule(workspaces: configStore.config.workspaces)
 
         // Re-evaluate whenever the config hot-reloads.
         configStore.$config
             .dropFirst()
             .sink { [weak self] cfg in
-                self?.engine.updateLocalPlaylists(cfg.localPlaylists)
-                self?.evaluate()
+                guard let self else { return }
+                self.engine.updateLocalPlaylists(cfg.localPlaylists)
+                self.scheduleSensor.reschedule(workspaces: cfg.workspaces)
+                self.reconcileSensors()
+                self.evaluate()
             }
             .store(in: &cancellables)
 
@@ -78,7 +89,7 @@ final class AppController: ObservableObject {
         systemVolume.start()
         masterVolume = systemVolume.current() ?? 0.5
 
-        startSensors()
+        reconcileSensors()
         evaluate()
     }
 
@@ -98,11 +109,37 @@ final class AppController: ObservableObject {
         return String(format: "%dh %02dm %02ds", s / 3600, (s % 3600) / 60, s % 60)
     }
 
-    // MARK: Sensors
+    // MARK: Sensors (lazy activation)
 
-    private func startSensors() {
-        appFocus.start { [weak self] patch in
-            self?.ingest(patch)
+    /// The union of Context fields any enabled workspace's `match` actually references,
+    /// plus `.app` unconditionally (the core trigger, and what fallback/stickiness reason
+    /// about). Only sensors providing one of these fields are started.
+    private func requiredFields(_ workspaces: [Workspace]) -> Set<ContextField> {
+        var fields: Set<ContextField> = [.app]
+        for ws in workspaces where ws.enabled {
+            let m = ws.match
+            if !m.apps.isEmpty { fields.insert(.app) }
+            if !m.spaces.isEmpty { fields.insert(.space) }
+            if !m.focus.isEmpty { fields.insert(.focus) }
+            if m.meeting != nil { fields.formUnion([.meeting, .camera, .mic]) }
+            if m.timeBetween != nil { fields.insert(.time) }
+            if !m.weekdays.isEmpty { fields.insert(.weekday) }
+        }
+        return fields
+    }
+
+    private func reconcileSensors() {
+        let required = requiredFields(configStore.config.workspaces)
+        for sensor in allSensors {
+            let id = ObjectIdentifier(sensor)
+            let needed = !type(of: sensor).providedFields.isDisjoint(with: required)
+            if needed && !runningSensors.contains(id) {
+                sensor.start { [weak self] patch in self?.ingest(patch) }
+                runningSensors.insert(id)
+            } else if !needed && runningSensors.contains(id) {
+                sensor.stop()
+                runningSensors.remove(id)
+            }
         }
     }
 

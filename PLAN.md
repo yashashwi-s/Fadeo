@@ -576,7 +576,7 @@ test loop; OS glue is thin and swappable.
 | **M0** | Full-app skeleton: **dual activation policy** (window ⇄ menu-bar agent), sidebar shell, `MenuBarExtra`, login-start (`SMAppService`), config load + hot-reload, **Energy dashboard / context inspector**, AppIcon from master | shell + "full app + companion" duality + efficiency baseline (idle≈0%) |
 | **M1** | **Vertical slice:** Workspace model + AppFocus sensor + resolver + reconciler + `InternalEngine` with fades. Create a workspace, add an app, hear it work. | the whole pipeline end-to-end; first usable build |
 | **M2** | **Precedence engine** (4 bands + tiebreak chain) + **Conflict Simulator**; `ExternalConductor` (MediaRemote + Spotify/Music) | the deep customization + conducting real players |
-| **M3** | Remaining v1 sensors: Space (CGS shim) · Meeting (cam/mic) · Focus/Schedule (FSEvents + boundary timer) | all four triggers live |
+| **M3** ✅ | Remaining v1 sensors: Space (CGS shim) · Meeting (cam/mic) · Focus/Schedule (FSEvents + boundary timer). Also: real lazy sensor activation (a sensor starts only if an enabled workspace's `match` needs its fields) | all four triggers live |
 | **M4** | Full **Workspace editor UI** + Sound Library + Precedence UI + menu-bar companion polish + two-way YAML editor | both halves of the customizability pillar |
 | **M5** | **Licensing** (offline Ed25519, 14-day trial, $2, two-path soft nag) · opt-in **usage diagnostics** · **notifications** (`UNUserNotificationCenter`) · Sparkle updater · permissions wizard · notarization · **energy audit** · brand pass | shippable, paid, polished |
 | Later | Idle · browser URL · network/SSID · battery · headphones · calendar sensors; preset library; per-output-device routing; workspace import/share | breadth |

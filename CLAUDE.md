@@ -125,15 +125,37 @@ It also guards against re-publishing on its own writes or byte-identical rewrite
 (`lastWrittenData` check) — removing that guard reintroduces a re-evaluation storm (it
 happened once during development; see git history around the M1 commit).
 
-### Sensors
+### Sensors (all five live; lazily activated)
 
 `Sensor` (`Fadeo/Sources/Sensors/Sensor.swift`) is a small protocol: own one OS signal,
-emit `ContextPatch`es. Only `AppFocusSensor` (NSWorkspace activation notifications)
-exists so far. New sensors (Space, meeting/camera-mic, Focus/DND) should follow the same
-shape — push-based, zero cost when not started — and are intentionally *lazily
-activated* in the eventual design (only start a sensor whose `ContextField`s some enabled
-workspace actually references); `AppController.startSensors()` currently starts
-everything unconditionally since there's only one sensor, revisit this when adding more.
+emit `ContextPatch`es. Five implementations exist: `AppFocusSensor` (NSWorkspace
+activation), `SpaceSensor` (active-Space index via `Platform/SpaceBridge.swift`, private
+CGS/SkyLight symbols reached through dlopen/dlsym — degrades to `index: nil` if the
+symbols are ever renamed), `MeetingSensor` (camera/mic *usage* via CoreMediaIO/CoreAudio
+property listeners — observing usage isn't capturing, so this needs no TCC prompt),
+`FocusSensor` (current Focus/DND mode, parsed from the undocumented
+`~/Library/DoNotDisturb/DB/Assertions.json`, FSEvents-watched), and `ScheduleSensor` (a
+single `DispatchSourceTimer` armed for the *next* time/weekday boundary across all
+enabled workspaces, not a tick loop — fully disarmed when no workspace uses time/weekday
+matching).
+
+**Lazy activation is real, not aspirational**: `AppController.requiredFields()` unions
+the `ContextField`s any enabled workspace's `match` references (always including `.app`),
+and `reconcileSensors()` starts/stops each sensor in `allSensors` based on whether its
+`providedFields` intersects that set — re-run on every config change. A sensor whose
+fields nothing references holds zero observers. `ScheduleSensor` additionally needs the
+live workspace list to compute its next boundary, so it gets an explicit
+`reschedule(workspaces:)` call on every config change regardless of running state, on top
+of the generic start/stop lifecycle every other sensor gets through the `Sensor` protocol.
+
+Two of these were verified against real, undocumented data on the dev machine rather than
+trusted from web research alone: `SpaceBridge`'s `CGSCopyManagedDisplaySpaces` dictionary
+shape (the `"Display Identifier"` field is a per-display UUID, *not* the literal `"Main"`
+one might guess — matching relies on CGS returning the main display first instead), and
+`FocusSensor`'s `Assertions.json` schema (`storeAssertionRecords` present with a
+`modeIdentifier` when a Focus is active, absent when it's off). If macOS changes either
+private shape, expect these two to need a matching update — that's an accepted, documented
+risk (PLAN.md §18), not a bug.
 
 ### Actuators
 
