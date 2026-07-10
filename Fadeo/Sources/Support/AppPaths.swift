@@ -11,7 +11,7 @@ enum AppPaths {
     }
 
     static var configFile: URL {
-        supportDirectory.appendingPathComponent("config.json")
+        supportDirectory.appendingPathComponent("config.yaml")
     }
 
     /// Create the support directory if needed.

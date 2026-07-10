@@ -117,7 +117,8 @@ path that bypasses `updatePolicy()`.
 ### Config: hot-reloaded, never crashes on a bad edit
 
 `ConfigStore` (`Fadeo/Sources/Config/ConfigStore.swift`) is the single source of truth
-for `Config`, persisted at `~/Library/Application Support/Fadeo/config.json`. It watches
+for `Config`, persisted at `~/Library/Application Support/Fadeo/config.yaml` (YAML via
+Yams, not JSON — comments matter for a hand-edited rules file). It watches
 the *directory* (not the file) via FSEvents (`FileWatcher`) so atomic editor saves
 (write-temp-then-rename) are caught. On a decode failure it keeps the last-good config
 and surfaces `lastError` instead of crashing — preserve this behavior in any change here.

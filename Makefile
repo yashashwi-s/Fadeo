@@ -2,6 +2,14 @@
 DEVELOPER_DIR ?= $(shell [ -d /Applications/Xcode.app ] && echo /Applications/Xcode.app/Contents/Developer || echo /Applications/Xcode-beta.app/Contents/Developer)
 export DEVELOPER_DIR
 
+# Some shells export CC/CXX pointing at Homebrew gcc, which SwiftPM's C-target builds
+# (e.g. Yams' CYaml shim) pick up instead of clang — gcc chokes on clang-only flags
+# xcodebuild passes. Force clang for this build only; doesn't touch your shell profile.
+CC := $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang
+CXX := $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang++
+export CC
+export CXX
+
 SCHEME  := Fadeo
 CONFIG  := Debug
 DERIVED := build

@@ -1,4 +1,5 @@
 import XCTest
+import Yams
 @testable import FadeoCore
 
 final class ConfigTests: XCTestCase {
@@ -24,6 +25,30 @@ final class ConfigTests: XCTestCase {
         XCTAssertFalse(w.isOverride)
         XCTAssertEqual(w.match.apps.first?.strength, .strong)   // strength defaults to strong
         XCTAssertEqual(w.sound.action, .play)
+    }
+
+    func testDecodesRealYAMLWithComments() throws {
+        // The actual point of switching to YAML: a hand-edited file with comments must
+        // parse exactly like the equivalent JSON would.
+        let yaml = """
+        # Fadeo config — hand-edited
+        version: 1
+        settings:
+          fallback: silence   # fade out when nothing matches
+        workspaces:
+          - id: focus
+            name: Focus
+            match:
+              apps:
+                - bundle: com.apple.dt.Xcode   # inline comment
+            sound:
+              source: internal:preset:brown-noise
+              volume: 0.5
+        """
+        let cfg = try ConfigCodec.decode(string: yaml)
+        XCTAssertEqual(cfg.settings.fallback, .silence)
+        XCTAssertEqual(cfg.workspaces.first?.sound.volume, 0.5)
+        XCTAssertEqual(cfg.workspaces.first?.match.apps.first?.bundle, "com.apple.dt.Xcode")
     }
 
     func testSoundOrderAndRepeatDefaults() {
@@ -84,6 +109,14 @@ final class TimeWindowTests: XCTestCase {
     func testDecodesFromArray() throws {
         let json = "[\"18:00\",\"07:00\"]"
         let w = try JSONDecoder().decode(TimeWindow.self, from: Data(json.utf8))
+        XCTAssertEqual(w.start, "18:00")
+        XCTAssertEqual(w.end, "07:00")
+    }
+
+    func testDecodesFromYAMLArray() throws {
+        // Yams' unkeyed-container path must behave the same as JSONDecoder's here — this
+        // is the trickiest custom decode logic in the model (array-or-object ambiguity).
+        let w = try YAMLDecoder().decode(TimeWindow.self, from: "[\"18:00\", \"07:00\"]")
         XCTAssertEqual(w.start, "18:00")
         XCTAssertEqual(w.end, "07:00")
     }

@@ -1,23 +1,27 @@
 import Foundation
+import Yams
 
 // MARK: - Serialization
 
-/// Codec for the on-disk config. M0 uses pretty JSON (built-in, zero-dependency,
-/// round-trips losslessly). A YAML front-end (Yams) slots in at M4 without touching
-/// the model — everything here is plain `Codable`.
+/// Codec for the on-disk config. YAML (not JSON) is the format users actually hand-edit —
+/// it supports comments, which matters for a rules file people are meant to tweak
+/// (PLAN.md's "power user" surface). Everything here is plain `Codable`; Yams is the only
+/// dependency FadeoCore has, and it's pure Swift with no OS calls.
 public enum ConfigCodec {
     public static func encode(_ config: Config) throws -> Data {
-        let enc = JSONEncoder()
-        enc.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        return try enc.encode(config)
+        let encoder = YAMLEncoder()
+        encoder.options.sortKeys = true
+        let yaml = try encoder.encode(config)
+        return Data(yaml.utf8)
     }
 
     public static func decode(_ data: Data) throws -> Config {
-        try JSONDecoder().decode(Config.self, from: data)
+        let string = String(decoding: data, as: UTF8.self)
+        return try decode(string: string)
     }
 
     public static func decode(string: String) throws -> Config {
-        try decode(Data(string.utf8))
+        try YAMLDecoder().decode(Config.self, from: string)
     }
 }
 
