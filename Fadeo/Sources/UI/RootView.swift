@@ -45,14 +45,23 @@ enum Pane: String, CaseIterable, Identifiable {
 
 struct RootView: View {
     @EnvironmentObject var controller: AppController
+    @EnvironmentObject var licenseManager: LicenseManager
     // Dev/screenshot-verification hook: FADEO_INITIAL_PANE=<rawValue> jumps straight to a
     // pane at launch without needing UI-click automation. Never set in the shipped app.
     @State private var selection: Pane = Pane(rawValue: ProcessInfo.processInfo.environment["FADEO_INITIAL_PANE"] ?? "") ?? .now
     @State private var showOnboarding = !OnboardingSheet.hasCompleted
+    @State private var showNag = false
 
     var body: some View {
         content
             .sheet(isPresented: $showOnboarding) { OnboardingSheet(isPresented: $showOnboarding) }
+            .sheet(isPresented: $showNag) { NagSheet(licenseManager: licenseManager, isPresented: $showNag) }
+            .onChange(of: showOnboarding) { _, stillShowing in
+                if !stillShowing { showNag = licenseManager.shouldShowNag }
+            }
+            .onAppear {
+                if !showOnboarding { showNag = licenseManager.shouldShowNag }
+            }
     }
 
     private var content: some View {

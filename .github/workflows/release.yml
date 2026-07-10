@@ -23,48 +23,77 @@ jobs:
       - name: Test FadeoCore
         run: swift test --package-path Packages/FadeoCore
 
+      # Same case-sensitive-volume workaround as ci.yml: Yams ships a top-level Bazel
+      # "BUILD" file, which collides with xcodebuild's own per-package "build/" product
+      # staging directory on the default case-insensitive filesystem.
+      - name: Create case-sensitive build volume
+        run: |
+          hdiutil create -size 8g -type SPARSE -fs 'Case-sensitive APFS' -volname CIBuild ~/ci-build
+          MOUNT=$(hdiutil attach ~/ci-build.sparseimage -nobrowse | tail -1 | awk '{print $NF}')
+          echo "CI_VOLUME=$MOUNT" >> "$GITHUB_ENV"
+
+      - name: Copy checkout to case-sensitive volume
+        run: |
+          mkdir -p "$CI_VOLUME/Fadeo"
+          cp -R . "$CI_VOLUME/Fadeo"
+
       - name: Generate Xcode Project
+        working-directory: ${{ env.CI_VOLUME }}/Fadeo
         run: xcodegen generate
 
+      - name: Resolve Package Dependencies
+        working-directory: ${{ env.CI_VOLUME }}/Fadeo
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project Fadeo.xcodeproj \
+            -scheme Fadeo \
+            -derivedDataPath build
+
+      # No CONFIGURATION_BUILD_DIR override: see ci.yml for why. Product lands at the
+      # normal Build/Products/Release path under derivedDataPath instead.
       - name: Build Release
+        working-directory: ${{ env.CI_VOLUME }}/Fadeo
         run: |
           xcodebuild \
             -project Fadeo.xcodeproj \
             -scheme Fadeo \
             -configuration Release \
             -derivedDataPath build \
-            CONFIGURATION_BUILD_DIR=build/Release \
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGN_STYLE=Manual \
             DEVELOPMENT_TEAM="" \
             build
 
       - name: Validate Build
+        working-directory: ${{ env.CI_VOLUME }}/Fadeo
         run: |
-          APP_PATH="build/Release/Fadeo.app"
-          if [ ! -d "$APP_PATH" ]; then
+          APP_PATH=$(find build -maxdepth 5 -name "Fadeo.app" -type d | head -1)
+          if [ -z "$APP_PATH" ]; then
             echo "Fadeo.app not found"
             exit 1
           fi
+          echo "Found: $APP_PATH"
           SIZE=$(du -sm "$APP_PATH" | cut -f1)
           echo "Fadeo.app size: ${SIZE}MB"
           if [ "$SIZE" -lt 1 ]; then
-            echo "Build output too small"
+            echo "Build output too small (${SIZE}MB)"
             exit 1
           fi
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          cp -R "$APP_PATH" "$GITHUB_WORKSPACE/dist/Fadeo.app"
 
       - name: Package Zip
         run: |
-          cd build/Release
+          cd dist
           ditto -c -k --sequesterRsrc --keepParent Fadeo.app Fadeo.app.zip
 
       - name: Package DMG
         run: |
           hdiutil create \
             -volname "Fadeo" \
-            -srcfolder build/Release/Fadeo.app \
+            -srcfolder dist/Fadeo.app \
             -ov -format UDZO \
-            build/Release/Fadeo.dmg
+            dist/Fadeo.dmg
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -74,5 +103,5 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: |
-            build/Release/Fadeo.app.zip
-            build/Release/Fadeo.dmg
+            dist/Fadeo.app.zip
+            dist/Fadeo.dmg

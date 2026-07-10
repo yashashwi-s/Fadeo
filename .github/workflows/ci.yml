@@ -57,6 +57,11 @@ jobs:
             -scheme Fadeo \
             -derivedDataPath build
 
+      # No CONFIGURATION_BUILD_DIR override here: forcing every target's product into one
+      # flat directory confuses xcodebuild's implicit search paths for SPM package module
+      # products, which is what caused "no such module 'Yams'" even though Yams itself had
+      # started compiling. Let xcodebuild use its normal per-configuration layout under
+      # derivedDataPath and locate the .app afterward instead.
       - name: Build
         working-directory: ${{ env.CI_VOLUME }}/Fadeo
         run: |
@@ -65,7 +70,6 @@ jobs:
             -scheme Fadeo \
             -configuration Release \
             -derivedDataPath build \
-            CONFIGURATION_BUILD_DIR=build/Release \
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGN_STYLE=Manual \
             DEVELOPMENT_TEAM="" \
@@ -74,11 +78,12 @@ jobs:
       - name: Validate Build
         working-directory: ${{ env.CI_VOLUME }}/Fadeo
         run: |
-          APP_PATH="build/Release/Fadeo.app"
-          if [ ! -d "$APP_PATH" ]; then
+          APP_PATH=$(find build -maxdepth 5 -name "Fadeo.app" -type d | head -1)
+          if [ -z "$APP_PATH" ]; then
             echo "Fadeo.app not found"
             exit 1
           fi
+          echo "Found: $APP_PATH"
           SIZE=$(du -sm "$APP_PATH" | cut -f1)
           echo "Fadeo.app size: ${SIZE}MB"
           if [ "$SIZE" -lt 1 ]; then

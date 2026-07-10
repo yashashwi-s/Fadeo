@@ -190,6 +190,10 @@ struct PreferencesPane: View {
 // MARK: - About
 
 struct AboutPane: View {
+    @EnvironmentObject var licenseManager: LicenseManager
+    @State private var licenseKeyInput = ""
+    @State private var showKeyEntry = false
+
     private var version: String {
         let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
         let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
@@ -197,23 +201,73 @@ struct AboutPane: View {
     }
 
     var body: some View {
-        VStack(spacing: 14) {
-            Image("AppLogo").resizable().scaledToFit().frame(width: 96, height: 96)
-                .clipShape(RoundedRectangle(cornerRadius: 20))
-            Text("Fadeo").font(.largeTitle.weight(.semibold))
-            Text("The right sound for what you're doing.").foregroundStyle(.secondary)
-            Text("Version \(version)").font(.caption).foregroundStyle(.secondary)
-            Divider().frame(width: 220).padding(.vertical, 6)
-            VStack(spacing: 4) {
-                Text("Open source · GPLv3").font(.callout.weight(.medium))
-                Text("Fully functional. A gentle reminder appears until licensed, never a lockout.")
-                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+        ScrollView {
+            VStack(spacing: 14) {
+                Image("AppLogo").resizable().scaledToFit().frame(width: 96, height: 96)
+                    .clipShape(RoundedRectangle(cornerRadius: 20))
+                Text("Fadeo").font(.largeTitle.weight(.semibold))
+                Text("The right sound for what you're doing.").foregroundStyle(.secondary)
+                Text("Version \(version)").font(.caption).foregroundStyle(.secondary)
+                Divider().frame(width: 220).padding(.vertical, 6)
+                VStack(spacing: 4) {
+                    Text("Open source · GPLv3").font(.callout.weight(.medium))
+                    Text("Fully functional. A gentle reminder appears until licensed, never a lockout.")
+                        .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: 360)
+
+                Divider().frame(width: 220).padding(.vertical, 6)
+                licenseSection
             }
-            .frame(maxWidth: 360)
+            .frame(maxWidth: .infinity)
+            .padding(30)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(30)
         .navigationTitle("About")
+    }
+
+    private var licenseSection: some View {
+        VStack(spacing: 10) {
+            switch licenseManager.status {
+            case .licensed:
+                Label("Licensed · thank you", systemImage: "checkmark.seal.fill")
+                    .font(.callout.weight(.medium)).foregroundStyle(.green)
+            case .trial(let daysRemaining):
+                Text("Trial · \(daysRemaining) day\(daysRemaining == 1 ? "" : "s") remaining")
+                    .font(.callout).foregroundStyle(.secondary)
+            case .trialExpired:
+                Text("Trial ended").font(.callout).foregroundStyle(.secondary)
+            }
+
+            if !licenseManager.isLicensed {
+                if showKeyEntry {
+                    VStack(spacing: 8) {
+                        TextField("FADEO1.\u{2026}", text: $licenseKeyInput)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.callout, design: .monospaced))
+                            .frame(width: 280)
+                        if let error = licenseManager.licenseError {
+                            Text(error).font(.caption).foregroundStyle(.red).frame(maxWidth: 280)
+                        }
+                        HStack {
+                            Button("Cancel") { showKeyEntry = false; licenseKeyInput = "" }
+                            Button("Activate") { licenseManager.activate(licenseKeyInput) }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(licenseKeyInput.isEmpty)
+                        }
+                    }
+                } else {
+                    HStack(spacing: 10) {
+                        Button("Buy for $2") {
+                            if let url = URL(string: "https://puremac.yashashwi.me/fadeo") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        Button("Enter License Key") { showKeyEntry = true }
+                    }
+                }
+            }
+        }
     }
 }
 

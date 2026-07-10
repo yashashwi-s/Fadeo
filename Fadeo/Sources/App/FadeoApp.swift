@@ -5,6 +5,7 @@ struct FadeoApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var configStore: ConfigStore
     @StateObject private var controller: AppController
+    @StateObject private var licenseManager = LicenseManager()
 
     init() {
         // One ConfigStore, shared by the controller and the UI.
@@ -18,6 +19,7 @@ struct FadeoApp: App {
             RootView()
                 .environmentObject(controller)
                 .environmentObject(configStore)
+                .environmentObject(licenseManager)
         }
         .windowResizability(.contentSize)
         .commands { CommandGroup(replacing: .newItem) {} }  // no File ▸ New
