@@ -58,6 +58,7 @@ final class ExternalConductor {
         case .generic:
             mediaRemote.play()
         case .appleMusic(let playlist):
+            ensureRunningHeadless(bundleID: "com.apple.Music")
             if let playlist, let url = shareLinkURL(playlist) {
                 openShareLink(url, bundleID: "com.apple.Music")
                 playAfterHandoff(#"tell application "Music" to play"#)
@@ -71,6 +72,7 @@ final class ExternalConductor {
                 AppleScriptRunner.run(#"tell application "Music" to play"#)
             }
         case .spotify(let playlist):
+            ensureRunningHeadless(bundleID: "com.spotify.client")
             if let playlist, let url = shareLinkURL(playlist) {
                 openShareLink(url, bundleID: "com.spotify.client")
                 playAfterHandoff(#"tell application "Spotify" to play"#)
@@ -133,7 +135,31 @@ final class ExternalConductor {
             NSWorkspace.shared.open(url)   // app not found by id, best effort via default handler
             return
         }
-        NSWorkspace.shared.open([url], withApplicationAt: appURL, configuration: NSWorkspace.OpenConfiguration())
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = false
+        configuration.hides = true
+        NSWorkspace.shared.open([url], withApplicationAt: appURL, configuration: configuration)
+    }
+
+    /// Apple Events sent to a not-yet-running regular app trigger Launch Services'
+    /// default foreground launch, which is why bare `tell application "Music" to play`
+    /// steals focus the first time. Claiming the launch ourselves with `activates =
+    /// false, hides = true` beforehand means the app is already running (or launching
+    /// hidden) by the time the AppleScript command reaches it, so the Apple Event just
+    /// talks to that instance instead of triggering its own foregrounding launch.
+    /// No-op if the app is already running — talking to a running app never changes
+    /// its front/back state regardless of activation settings.
+    private func ensureRunningHeadless(bundleID: String) {
+        guard NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == bundleID }) == nil else { return }
+        guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = false
+        configuration.hides = true
+        NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { _, error in
+            if let error {
+                NSLog("Fadeo: headless launch of \(bundleID) failed: \(error)")
+            }
+        }
     }
 
     /// A share link loads/cues the right track but does NOT auto-start playback (verified
