@@ -29,23 +29,28 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      # Yams ships a top-level Bazel "BUILD" file, which collides with xcodebuild's own
+      # per-package "build/" product staging directory on macOS's default case-insensitive
+      # filesystem ("BUILD" == "build" there). This isn't a race (pre-resolving first
+      # doesn't help, verified) — it's deterministic. The standard fix is to build from a
+      # case-sensitive APFS volume instead, so the two paths are genuinely distinct.
+      - name: Create case-sensitive build volume
+        run: |
+          hdiutil create -size 8g -type SPARSE -fs 'Case-sensitive APFS' -volname CIBuild ~/ci-build
+          MOUNT=$(hdiutil attach ~/ci-build.sparseimage -nobrowse | tail -1 | awk '{print $NF}')
+          echo "CI_VOLUME=$MOUNT" >> "$GITHUB_ENV"
+
+      - name: Copy checkout to case-sensitive volume
+        run: |
+          mkdir -p "$CI_VOLUME/Fadeo"
+          cp -R . "$CI_VOLUME/Fadeo"
+
       - name: Generate Xcode Project
+        working-directory: ${{ env.CI_VOLUME }}/Fadeo
         run: xcodegen generate
 
-      - name: Resolve Package Dependencies
-        # Separate, isolated step: xcodebuild's package checkout + its own per-package
-        # scratch "build" directory creation is a known resolve-vs-build race on the
-        # older xcodebuild that ships with this runner's Xcode, and Yams ships a
-        # top-level Bazel BUILD file that collides with that directory on macOS's
-        # case-insensitive filesystem. Resolving fully first (so the checkout settles
-        # before the actual build step runs) avoids it.
-        run: |
-          xcodebuild -resolvePackageDependencies \
-            -project Fadeo.xcodeproj \
-            -scheme Fadeo \
-            -derivedDataPath build
-
       - name: Build
+        working-directory: ${{ env.CI_VOLUME }}/Fadeo
         run: |
           xcodebuild \
             -project Fadeo.xcodeproj \
@@ -59,6 +64,7 @@ jobs:
             build
 
       - name: Validate Build
+        working-directory: ${{ env.CI_VOLUME }}/Fadeo
         run: |
           APP_PATH="build/Release/Fadeo.app"
           if [ ! -d "$APP_PATH" ]; then
