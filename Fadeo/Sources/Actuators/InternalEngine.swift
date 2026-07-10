@@ -31,7 +31,7 @@ final class InternalEngine {
         case .crossfade(let source, let volume, let ms):
             crossfade(to: source, volume: volume, ms: ms)
         case .setVolume(let volume, let ms):
-            renderer.setRamp(to: Float(volume), ms: ms, sampleRate: sampleRate)
+            renderer.setRamp(to: calibratedGain(volume, source: state.source ?? ""), ms: ms, sampleRate: sampleRate)
             state.volume = volume
         case .stop(let fadeMs):
             stop(fadeMs: fadeMs)
@@ -45,8 +45,21 @@ final class InternalEngine {
         renderer.kind = NoiseRenderer.Kind(source: source)
         configureIfNeeded()
         startEngineIfNeeded()
-        renderer.setRamp(to: Float(volume), ms: fadeMs, sampleRate: sampleRate)
+        renderer.setRamp(to: calibratedGain(volume, source: source), ms: fadeMs, sampleRate: sampleRate)
         state = AudioState(source: source, volume: volume, playing: true)
+    }
+
+    /// Perceptual calibration so equal baseline numbers sound equally loud across noise
+    /// textures (white reads far louder than brown at the same RMS). Does NOT include the
+    /// system volume — the hardware applies that (PLAN.md 6a).
+    private func calibratedGain(_ volume: Double, source: String) -> Float {
+        let cal: Float
+        switch NoiseRenderer.Kind(source: source) {
+        case .brown: cal = 1.0
+        case .pink:  cal = 0.85
+        case .white: cal = 0.5
+        }
+        return Float(volume) * cal
     }
 
     private func crossfade(to source: String, volume: Double, ms: Int) {
@@ -58,7 +71,7 @@ final class InternalEngine {
             guard let self else { return }
             // …swap texture at the trough, fade the incoming one up.
             self.renderer.kind = NoiseRenderer.Kind(source: source)
-            self.renderer.setRamp(to: Float(volume), ms: half, sampleRate: self.sampleRate)
+            self.renderer.setRamp(to: self.calibratedGain(volume, source: source), ms: half, sampleRate: self.sampleRate)
             self.state = AudioState(source: source, volume: volume, playing: true)
         }
         pendingWork = work

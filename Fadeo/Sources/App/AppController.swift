@@ -35,6 +35,10 @@ final class AppController: ObservableObject {
     private let reconciler = Reconciler()
     private var audioState: AudioState = .silent
 
+    // Master level == the macOS system volume (single source of truth; see PLAN.md 6a).
+    let systemVolume = SystemVolume()
+    @Published var masterVolume: Float = 0.5
+
     // Sensors (only AppFocus in M0; the rest slot in behind the same protocol at M3)
     private let appFocus = AppFocusSensor()
 
@@ -53,8 +57,19 @@ final class AppController: ObservableObject {
             .sink { [weak self] _ in self?.evaluate() }
             .store(in: &cancellables)
 
+        // Master volume mirrors the system volume, live.
+        systemVolume.onChange = { [weak self] v in self?.masterVolume = v }
+        systemVolume.start()
+        masterVolume = systemVolume.current() ?? 0.5
+
         startSensors()
         evaluate()
+    }
+
+    /// Setting Fadeo's master level sets the actual system volume (not a separate gain).
+    func setMasterVolume(_ v: Float) {
+        masterVolume = v
+        systemVolume.set(v)
     }
 
     var activeWorkspaceName: String? {
