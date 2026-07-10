@@ -179,7 +179,7 @@ struct SoundEditor: View {
                 Text("Spotify").tag("spotify")
             }
             .labelsHidden()
-            TextField("Playlist name (Apple Music) or URI (Spotify) — leave empty to just play/pause",
+            TextField("Playlist name, a spotify: URI, or paste a share link — leave empty to just play/pause",
                      text: Binding(
                         get: { externalPlaylistText },
                         set: { rebuildExternal(provider: externalProvider, playlist: $0) }

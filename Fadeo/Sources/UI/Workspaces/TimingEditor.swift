@@ -27,11 +27,19 @@ struct TimingEditor: View {
                 set: { on in value.wrappedValue = on ? Int((range.upperBound / 4)) : nil }
             ))
             Spacer()
-            if let v = value.wrappedValue {
+            if value.wrappedValue != nil {
+                let ms = Binding<Int>(
+                    get: { value.wrappedValue ?? 0 },
+                    set: { value.wrappedValue = max(0, $0) }
+                )
                 Slider(value: Binding(
-                    get: { Double(v) }, set: { value.wrappedValue = Int($0) }
-                ), in: range).frame(width: 140)
-                Text("\(v) ms").font(.caption).monospacedDigit().frame(width: 60, alignment: .trailing)
+                    get: { Double(ms.wrappedValue) }, set: { ms.wrappedValue = Int($0) }
+                ), in: range).frame(width: 120)
+                TextField("", value: ms, format: .number)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 56)
+                    .multilineTextAlignment(.trailing)
+                Text("ms").font(.caption).foregroundStyle(.secondary)
             }
         }
         .font(.callout)

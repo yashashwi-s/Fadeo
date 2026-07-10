@@ -283,52 +283,40 @@ never thrashes. All user-tunable; sensible defaults ship.
 
 ---
 
-## 6a. Volume model: system-consistent, not async (core feature)
+## 6a. Volume model: one concept, not two (core feature)
 
-**Goal:** Fadeo's loudness must feel like part of the system, not a second, drifting
-volume the user has to reconcile. Per-sound and per-app levels are set once as a *mix*;
-turning the overall level up or down moves the *actual macOS system volume*, not a hidden
-Fadeo-only gain.
+**DECIDED (revised after hands-on use):** Fadeo does not read, write, or mirror the macOS
+system volume at all, and has no volume control of its own in the menu bar. There is
+exactly **one** volume concept in the whole app: each workspace's own **per-source/per-app
+mix level** (`Sound.volume` + `perApp`) — "brown-noise sits at 0.6", "rain at 0.45", "Xcode
+a touch louder". This is not a "master" and was never meant to compete with one; it behaves
+like a channel fader, not a system-wide control.
 
-**Research facts that decide the design:**
-- macOS scales every app's output by the **system output volume at the hardware/device
-  layer**, so Fadeo's `AVAudioEngine` output is *already* affected by the system volume.
-  We must **not** multiply by it again in software (that would double-apply it).
-- The system volume is readable/writable via CoreAudio
-  **`kAudioHardwareServiceDeviceProperty_VirtualMainVolume`** on the default output device,
-  and observable via `AudioObjectAddPropertyListenerBlock` (event-driven, no polling).
-- macOS has **no public per-app output-volume API**; true per-app mixing needs a virtual
-  audio device (BackgroundMusic-style). References for the UX: **Sound Control** and
-  **SoundSource** (they do per-app volume but not context switching). So for *external*
-  players we set that app's own `sound volume` (Spotify/Music via AppleScript); for our
-  *internal* engine we control our own gain.
+**Why the earlier system-volume-mirroring design got cut:** an early version added a
+menu-bar slider that read/wrote the actual system volume live (via CoreAudio
+`kAudioHardwareServiceDeviceProperty_VirtualMainVolume`), reasoning that Fadeo's "master"
+should just be the real system volume rather than a second async one. In practice, having
+*both* a per-workspace mix level *and* a menu-bar volume control reads as two competing
+volumes, which is exactly the confusion it was meant to avoid — simpler to have only one.
+`Platform/SystemVolume.swift` and the menu-bar slider were removed entirely.
 
-**Three-layer model:**
+**What's unchanged:** macOS scales every app's output by the system output volume at the
+hardware layer regardless — `AVAudioEngine`'s output is already affected by it, and Fadeo
+still never multiplies by it in software (nothing to get wrong now, since we don't touch
+CoreAudio's volume properties at all). Effective loudness = `baseline × calibration` (our
+own gain) `× systemVolume` (applied by the hardware, invisibly, same as any other app).
 
-1. **Per-source / per-app baseline (the mix)** — a relative `0…1` set beforehand, per
-   source and per member app (`Sound.volume` + `perApp`). "brown-noise sits at 0.6",
-   "rain at 0.45", "Xcode a touch louder". This is Fadeo-relative and never touches the
-   system volume, so you can balance your soundscape without turning the whole Mac up.
+**Two-layer model (down from three):**
+1. **Per-source / per-app baseline (the mix)** — `Sound.volume` + `perApp`, `0…1`,
+   Fadeo-relative. Edited per workspace in the Workspace editor.
 2. **Perceptual calibration (per source)** — a fixed per-source correction so equal
-   baseline numbers *sound* equally loud (white noise is perceptually much louder than
-   brown at the same RMS). Applied automatically; makes "60%" mean the same thing across
-   sources. Internal presets ship with a calibration table; files/external default to 1.0
-   with optional measured normalization later.
-3. **Master = the macOS system volume (single source of truth).** Fadeo reads it, observes
-   it live, and its own volume control *sets the system volume*. There is no independent
-   async master. Effective loudness = `baseline × calibration` (our engine gain) `×
-   systemVolume` (applied by the hardware). So when you nudge Fadeo's level, or hit the
-   volume keys, or drag the menu-bar slider, they are all the same knob.
+   baseline numbers *sound* equally loud (white noise reads far louder than brown at the
+   same RMS). Applied automatically in `InternalEngine.calibratedGain`; not applied to
+   user files (pre-mastered content) or external sources (the target app owns that).
 
-**Settings:** `linkMasterToSystemVolume` (default **on** — the behavior above). Off is an
-advanced escape hatch that applies a Fadeo-only software master (explicitly the "async"
-mode the user did *not* want, offered only for completeness). Optional
-`ensureAudibleOnPlay` (nudge system volume up to a floor if it's at zero when autoplay
-starts) is **off** by default (never grab the volume unasked).
-
-**Surfaces:** a menu-bar volume slider bound to the system volume; per-source/per-app
-baseline sliders in the Workspace editor (M4). External-player baselines map to that
-app's own volume (M2).
+For **external** players, the baseline maps to that app's own `sound volume` (AppleScript);
+system volume, physical volume keys, and Control Center remain the only way to change
+overall loudness — exactly as if Fadeo weren't there, which is the point.
 
 ---
 

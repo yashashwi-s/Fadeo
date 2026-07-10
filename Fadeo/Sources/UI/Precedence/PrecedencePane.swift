@@ -112,10 +112,15 @@ struct PrecedencePane: View {
     }
 
     private func defaultRow(_ label: String, _ value: Binding<Int>, _ range: ClosedRange<Double>) -> some View {
-        HStack {
+        let clamped = Binding<Int>(get: { value.wrappedValue }, set: { value.wrappedValue = max(0, $0) })
+        return HStack {
             Text(label).foregroundStyle(.secondary).frame(width: 140, alignment: .leading)
-            Slider(value: Binding(get: { Double(value.wrappedValue) }, set: { value.wrappedValue = Int($0) }), in: range)
-            Text("\(value.wrappedValue) ms").font(.caption).monospacedDigit().frame(width: 60, alignment: .trailing)
+            Slider(value: Binding(get: { Double(clamped.wrappedValue) }, set: { clamped.wrappedValue = Int($0) }), in: range)
+            TextField("", value: clamped, format: .number)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 56)
+                .multilineTextAlignment(.trailing)
+            Text("ms").font(.caption).foregroundStyle(.secondary)
         }
         .font(.callout)
     }

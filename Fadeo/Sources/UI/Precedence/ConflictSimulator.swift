@@ -38,7 +38,10 @@ struct ConflictSimulator: View {
                         Text("App").foregroundStyle(.secondary)
                         Picker("", selection: $appBundle) {
                             Text("None").tag("")
-                            ForEach(installedApps) { Text($0.name).tag($0.bundleID) }
+                            ForEach(installedApps) { app in
+                                Label { Text(app.name) } icon: { Image(nsImage: app.icon) }
+                                    .tag(app.bundleID)
+                            }
                         }.labelsHidden()
                     }
                     GridRow {

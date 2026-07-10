@@ -16,10 +16,6 @@ struct MenuBarContent: View {
             header
             Divider()
 
-            volumeRow.padding(.vertical, 7)
-
-            Divider()
-
             pauseRow.padding(.vertical, 4)
 
             Divider()
@@ -72,26 +68,6 @@ struct MenuBarContent: View {
         .padding(.horizontal, 13)
         .padding(.top, 12)
         .padding(.bottom, 11)
-    }
-
-    private var volumeRow: some View {
-        HStack(spacing: 9) {
-            Image(systemName: "speaker.fill")
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
-                .frame(width: 18)
-            Slider(
-                value: Binding(
-                    get: { Double(controller.masterVolume) },
-                    set: { controller.setMasterVolume(Float($0)) }
-                ),
-                in: 0...1
-            )
-            Image(systemName: "speaker.wave.3.fill")
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 13)
     }
 
     private var pauseRow: some View {

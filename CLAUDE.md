@@ -91,19 +91,19 @@ future Conflict Simulator are built on, so don't drop it when refactoring.
 prevents redundant fades/commands firing on every context tick — never bypass it by
 calling the actuator directly from a Decision.
 
-### Volume model: the system volume is the only master
+### Volume model: exactly one volume concept, not two
 
-There is deliberately no independent "Fadeo volume." `SystemVolume`
-(`Fadeo/Sources/Platform/SystemVolume.swift`) reads/writes/observes the actual macOS
-output volume via CoreAudio (`kAudioHardwareServiceDeviceProperty_VirtualMainVolume`,
-event-driven via `AudioObjectAddPropertyListenerBlock`, no polling). `AppController`
-mirrors it into `masterVolume`, and the menu-bar slider *sets the system volume* rather
-than an app-local gain. `Workspace.sound.volume` / `perApp` overrides are a relative
-*baseline mix* (per-source, per-app), separately perceptually calibrated in
-`InternalEngine.calibratedGain` so equal baseline numbers sound equally loud across noise
-textures (white noise is louder than brown at the same RMS). See PLAN.md §6a before
-touching any of this — the "don't double-apply the system volume in software, and don't
-add a second async master" constraint is easy to accidentally violate.
+Fadeo has **no system-volume control anywhere** (no menu-bar slider, nothing reads/writes
+CoreAudio's volume) — this was tried (a `SystemVolume` class mirroring the real system
+volume into a menu-bar slider) and removed after real use showed it just reads as a second,
+competing volume next to each workspace's own level. `Workspace.sound.volume` / `perApp`
+overrides are the only volume UI in the app — a relative *baseline mix* per source/app, not
+a master. Perceptually calibrated in `InternalEngine.calibratedGain` so equal baseline
+numbers sound equally loud across noise textures (white noise is louder than brown at the
+same RMS). System volume, physical volume keys, and Control Center remain the only way to
+change overall loudness — same as any other app. See PLAN.md §6a before reintroducing
+anything system-volume-related; if it comes back, it needs a stronger reason than "the
+system should be the master" — that reasoning already lost to real-use feedback once.
 
 ### Dual activation policy
 

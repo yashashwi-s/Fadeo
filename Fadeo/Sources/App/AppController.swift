@@ -46,10 +46,6 @@ final class AppController: ObservableObject {
     private enum Actuator: Equatable { case none, internalEngine, external }
     private var activeActuator: Actuator = .none
 
-    // Master level == the macOS system volume (single source of truth; see PLAN.md 6a).
-    let systemVolume = SystemVolume()
-    @Published var masterVolume: Float = 0.5
-
     // Sensors — lazily activated: a sensor whose fields no enabled workspace references
     // is never started (zero observers, zero cost). See requiredFields()/reconcileSensors().
     private let appFocus = AppFocusSensor()
@@ -84,19 +80,8 @@ final class AppController: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // Master volume mirrors the system volume, live.
-        systemVolume.onChange = { [weak self] v in self?.masterVolume = v }
-        systemVolume.start()
-        masterVolume = systemVolume.current() ?? 0.5
-
         reconcileSensors()
         evaluate()
-    }
-
-    /// Setting Fadeo's master level sets the actual system volume (not a separate gain).
-    func setMasterVolume(_ v: Float) {
-        masterVolume = v
-        systemVolume.set(v)
     }
 
     var activeWorkspaceName: String? {
