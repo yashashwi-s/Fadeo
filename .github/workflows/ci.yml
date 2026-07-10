@@ -38,6 +38,7 @@ jobs:
             -project Fadeo.xcodeproj \
             -scheme Fadeo \
             -configuration Release \
+            -derivedDataPath build \
             CONFIGURATION_BUILD_DIR=build/Release \
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGN_STYLE=Manual \
