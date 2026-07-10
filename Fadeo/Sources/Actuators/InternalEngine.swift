@@ -31,6 +31,9 @@ final class InternalEngine {
     private var playerNode: AVAudioPlayerNode?
     private let fileMixer = AVAudioMixerNode()
     private var fileConfigured = false
+    /// The format the player→mixer connection was last made with; reconnected whenever
+    /// the next track's processing format differs (see playCurrentQueueItem).
+    private var fileConnectionFormat: AVAudioFormat?
     private var queue: [URL] = []
     private var queueIndex = 0
     private var order: PlaybackOrder = .sequential
@@ -177,6 +180,17 @@ final class InternalEngine {
             NSLog("Fadeo InternalEngine: could not open \(url.lastPathComponent), skipping")
             advancePastUnplayable()
             return
+        }
+        // AVAudioPlayerNode does NOT sample-rate-convert: the player→mixer connection
+        // format must match the file's own processing format, or playback is silent /
+        // wrong-speed (a 44.1kHz mp3 through the engine's 48kHz graph — i.e. almost
+        // every real-world file). Reconnect per track when the format changes; the
+        // mixer's output side handles conversion to the engine rate from there.
+        if fileConnectionFormat != file.processingFormat {
+            node.stop()
+            engine.disconnectNodeOutput(node)
+            engine.connect(node, to: fileMixer, format: file.processingFormat)
+            fileConnectionFormat = file.processingFormat
         }
         playbackGeneration += 1
         let generation = playbackGeneration
@@ -325,7 +339,9 @@ final class InternalEngine {
         let node = AVAudioPlayerNode()
         engine.attach(node)
         engine.attach(fileMixer)
-        engine.connect(node, to: fileMixer, format: fmt)
+        // The player→mixer leg is (re)connected per track with the file's own format —
+        // see playCurrentQueueItem. Only the mixer→main leg is fixed at the engine rate;
+        // AVAudioMixerNode converts between its inputs and its output format.
         engine.connect(fileMixer, to: engine.mainMixerNode, format: fmt)
         playerNode = node
         fileConfigured = true

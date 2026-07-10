@@ -120,4 +120,34 @@ final class TimeWindowTests: XCTestCase {
         XCTAssertEqual(w.start, "18:00")
         XCTAssertEqual(w.end, "07:00")
     }
+
+    // MARK: Saved sounds
+
+    func testSavedSoundsRoundTrip() throws {
+        var cfg = Config()
+        cfg.savedSounds = [
+            SavedSound(id: "s1", name: "Janice STFU",
+                       source: "external:appleMusic:playlist:https://music.apple.com/in/album/janice-stfu/6769568449?i=6769568596"),
+            SavedSound(id: "s2", name: "Focus mix", source: "external:spotify:playlist:spotify:playlist:37i9dQZF1DX8NTLI2TtZa6"),
+        ]
+        let back = try ConfigCodec.decode(try ConfigCodec.encode(cfg))
+        XCTAssertEqual(back.savedSounds, cfg.savedSounds)
+    }
+
+    func testShareLinkSourceSurvivesYAMLRoundTrip() throws {
+        // URLs carry ':', '?', '&', '#', '=' — every one a YAML-special character. The
+        // emitter must quote so the exact string comes back; a truncated or mangled
+        // source here is exactly the "my pasted link didn't save" bug class.
+        let url = "external:appleMusic:playlist:https://music.apple.com/in/album/x/1?i=2&x=3#frag"
+        var cfg = Config()
+        cfg.workspaces = [Workspace(id: "w", name: "w", match: Match(), sound: Sound(source: url))]
+        let back = try ConfigCodec.decode(try ConfigCodec.encode(cfg))
+        XCTAssertEqual(back.workspaces[0].sound.source, url)
+    }
+
+    func testConfigWithoutSavedSoundsStillDecodes() throws {
+        // Backward compatibility: every existing config.yaml lacks the key.
+        let cfg = try ConfigCodec.decode(string: "{ \"workspaces\": [] }")
+        XCTAssertEqual(cfg.savedSounds, [])
+    }
 }

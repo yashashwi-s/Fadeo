@@ -11,6 +11,18 @@ struct SoundEditor: View {
     let memberApps: [String]
     let installedApps: [InstalledApp]
     let allPlaylists: [LocalPlaylist]
+    var savedSounds: [SavedSound] = []
+    /// Persist a new saved sound (name, source) into the config. Provided by the pane
+    /// that owns config access; the editor itself only sees the workspace binding.
+    var onSaveSound: ((String, String) -> Void)?
+
+    /// Local draft of the external link/playlist text. Committing on submit/blur (not
+    /// every keystroke) matters: each save re-evaluates, and if this workspace is
+    /// active, a half-typed URL would fire a real handoff to Music/Spotify mid-typing.
+    @State private var linkDraft: String = ""
+    @FocusState private var linkFieldFocused: Bool
+    @State private var showSavePrompt = false
+    @State private var savePromptName = ""
 
     private enum Kind: String, CaseIterable, Identifiable {
         case preset, file, folder, playlist, external, silence
@@ -179,15 +191,80 @@ struct SoundEditor: View {
                 Text("Spotify").tag("spotify")
             }
             .labelsHidden()
-            TextField("Playlist name, a spotify: URI, or a share link. Leave empty to just play/pause",
-                     text: Binding(
-                        get: { externalPlaylistText },
-                        set: { rebuildExternal(provider: externalProvider, playlist: $0) }
-                     ))
-                .textFieldStyle(.roundedBorder)
+
+            if !externalSavedSounds.isEmpty {
+                Picker("Saved", selection: Binding(
+                    get: { savedSelectionID },
+                    set: { id in
+                        guard id != "custom", let saved = savedSounds.first(where: { $0.id == id }) else { return }
+                        sound.source = saved.source
+                        linkDraft = externalPlaylistText
+                    }
+                )) {
+                    Text("Custom / pasted link").tag("custom")
+                    ForEach(externalSavedSounds) { Text($0.name).tag($0.id) }
+                }
+            }
+
+            HStack(spacing: 6) {
+                TextField("Playlist name, a spotify: URI, or a share link. Leave empty to just play/pause",
+                          text: $linkDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($linkFieldFocused)
+                    .onSubmit { commitLinkDraft() }
+                    .onChange(of: linkFieldFocused) { _, focused in
+                        if !focused { commitLinkDraft() }
+                    }
+                if onSaveSound != nil {
+                    Button("Save…") {
+                        commitLinkDraft()
+                        savePromptName = ""
+                        showSavePrompt = true
+                    }
+                    .disabled(linkDraft.isEmpty)
+                    .help("Name this link and keep it in your Sound Library for reuse in any workspace")
+                }
+            }
+            if linkDraft != externalPlaylistText {
+                Text("Press Return (or click away) to apply the link.")
+                    .font(.caption2).foregroundStyle(.orange)
+            }
             Text(shareLinkExplanation)
                 .font(.caption2).foregroundStyle(.tertiary)
         }
+        .onAppear { linkDraft = externalPlaylistText }
+        .onChange(of: sound.source) { _, _ in
+            // Source changed underneath us (saved-sound pick, hot reload): resync the
+            // draft unless the user is mid-edit in the field.
+            if !linkFieldFocused { linkDraft = externalPlaylistText }
+        }
+        .alert("Save to Sound Library", isPresented: $showSavePrompt) {
+            TextField("Name (e.g. Deep Focus Mix)", text: $savePromptName)
+            Button("Save") {
+                let name = savePromptName.isEmpty ? linkDraft : savePromptName
+                onSaveSound?(name, sound.source ?? "")
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Saved sounds appear in the Saved picker here and in Sound Library, so you never paste the same link twice.")
+        }
+    }
+
+    /// Saved sounds usable in this picker (external sources only, any provider — picking
+    /// one switches the provider automatically since the full source string is copied).
+    private var externalSavedSounds: [SavedSound] {
+        savedSounds.filter { $0.source.hasPrefix("external:") }
+    }
+
+    private var savedSelectionID: String {
+        externalSavedSounds.first(where: { $0.source == sound.source })?.id ?? "custom"
+    }
+
+    private func commitLinkDraft() {
+        let trimmed = linkDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        linkDraft = trimmed
+        guard trimmed != externalPlaylistText else { return }
+        rebuildExternal(provider: externalProvider, playlist: trimmed)
     }
 
     private var shareLinkExplanation: String {

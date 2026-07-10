@@ -63,6 +63,12 @@ final class AppController: ObservableObject {
     private var pendingEval: DispatchWorkItem?
     private var cancellables = Set<AnyCancellable>()
 
+    // Switch gating (enter delay / exit delay / minimum dwell). One armed timer at most;
+    // any evaluation that re-affirms the current workspace cancels it, so a switch only
+    // commits if the new target held continuously for its grace period.
+    private var pendingSwitch: (target: String?, work: DispatchWorkItem)?
+    private var lastSwitchAt: Date = .distantPast
+
     let startedAt = Date()
 
     init(configStore: ConfigStore) {
@@ -197,15 +203,102 @@ final class AppController: ObservableObject {
         guard !automationPaused else { return }
         context.localTime = Date()
         let d = resolver.resolve(context: context, config: configStore.config, state: resolverState)
-        decision = d
-        // Advance state: an explicit active workspace becomes current; a keep/doNothing
-        // decision leaves the current workspace untouched.
+        decision = d   // the Now pane always shows the live resolution, gated or not
+
+        let current = resolverState.activeWorkspace
+        let isSwitch = switchesAway(d, from: current)
+
+        guard isSwitch else {
+            // Re-affirms the current state (same workspace, or a keep-current fallback).
+            // Cancel any armed switch — the user came back within the grace window,
+            // which is exactly what enter/exit delay exist for.
+            cancelPendingSwitch()
+            commit(d)
+            return
+        }
+
+        // Overrides pre-empt everything, including their own grace: a "Meetings" pause
+        // that waited out an enter delay would defeat its purpose.
+        if d.reason.band == .override {
+            cancelPendingSwitch()
+            commit(d)
+            return
+        }
+
+        let delayMs = switchGateMs(decision: d, current: current)
+        if delayMs <= 0 {
+            cancelPendingSwitch()
+            commit(d)
+            return
+        }
+
+        // A timer toward this same target is already running: let it ride (its deadline
+        // marks when the target has held long enough). A different target re-arms.
+        if pendingSwitch?.target == d.activeWorkspace { return }
+        cancelPendingSwitch()
+        let target = d.activeWorkspace
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.pendingSwitch = nil
+            self.context.localTime = Date()
+            let fresh = self.resolver.resolve(context: self.context, config: self.configStore.config, state: self.resolverState)
+            self.decision = fresh
+            if fresh.activeWorkspace == target {
+                self.commit(fresh)       // target held for the whole grace period
+            } else {
+                self.evaluate()          // world moved on; gate whatever wins now
+            }
+        }
+        pendingSwitch = (target, work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(delayMs), execute: work)
+    }
+
+    /// Whether this decision moves away from the current workspace (to another one, or
+    /// to a real stop) — as opposed to re-affirming it or a keep-current fallback.
+    private func switchesAway(_ d: Decision, from current: String?) -> Bool {
+        if let target = d.activeWorkspace { return target != current }
+        // No winner: only an actual stop/resume leaves the current workspace.
+        return current != nil && (d.target.action == .stop || d.target.action == .resumePrevious)
+    }
+
+    /// The gate for a switch: the larger of (remaining minimum dwell of the current
+    /// workspace) and (the incoming workspace's enter delay, or the outgoing one's exit
+    /// delay when falling to silence). No gate at all when nothing is active — there is
+    /// nothing to protect, and first playback should be instant.
+    private func switchGateMs(decision d: Decision, current: String?) -> Int {
+        let defaults = configStore.config.settings.defaults
+        guard let current, let currentWS = configStore.config.workspaces.first(where: { $0.id == current }) else {
+            return 0
+        }
+        let currentTiming = currentWS.timing.resolved(over: defaults)
+        let dwellRemaining = currentTiming.minDwellMs - Int(Date().timeIntervalSince(lastSwitchAt) * 1000)
+
+        let grace: Int
+        if let targetID = d.activeWorkspace,
+           let targetWS = configStore.config.workspaces.first(where: { $0.id == targetID }) {
+            grace = targetWS.timing.resolved(over: defaults).enterDelayMs
+        } else {
+            grace = currentTiming.exitDelayMs
+        }
+        return max(dwellRemaining, grace, 0)
+    }
+
+    private func cancelPendingSwitch() {
+        pendingSwitch?.work.cancel()
+        pendingSwitch = nil
+    }
+
+    /// Actually advance state and drive audio — the formerly-unconditional tail of
+    /// `evaluate()`, now only reached once a switch has cleared its gate.
+    private func commit(_ d: Decision) {
+        let before = resolverState.activeWorkspace
         if let ws = d.activeWorkspace {
             resolverState.activeWorkspace = ws
             resolverState.lastActive[ws] = Date()
         } else if d.target.action == .stop || d.target.action == .resumePrevious {
             resolverState.activeWorkspace = nil
         }
+        if resolverState.activeWorkspace != before { lastSwitchAt = Date() }
         recordUsageIfWorkspaceChanged(newWorkspaceID: d.activeWorkspace)
         applyAudio(d)
     }

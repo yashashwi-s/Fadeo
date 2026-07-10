@@ -13,12 +13,14 @@ import FadeoCore
 struct SoundLibraryPane: View {
     @EnvironmentObject var controller: AppController
     @State private var selection: String?
+    @State private var showAddSaved = false
 
     private var config: Config { controller.configStore.config }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                savedSoundsCard
                 playlistsCard
                 presetsCard
                 externalPlayersCard
@@ -26,6 +28,53 @@ struct SoundLibraryPane: View {
             .padding(20)
         }
         .navigationTitle("Sound Library")
+    }
+
+    // MARK: Saved sounds (named external links, reusable across workspaces)
+
+    private var savedSoundsCard: some View {
+        Card(title: "Saved links") {
+            VStack(alignment: .leading, spacing: 10) {
+                if config.savedSounds.isEmpty {
+                    Text("Paste an Apple Music or Spotify link once, name it, and reuse it in any workspace. Save from here, or with the Save button next to the link field in a workspace's Sound section.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                ForEach(config.savedSounds) { saved in
+                    SavedSoundRow(
+                        saved: savedBinding(for: saved.id),
+                        onDelete: { deleteSavedSound(saved.id) }
+                    )
+                }
+                Button("Add Link…") { showAddSaved = true }
+            }
+        }
+        .sheet(isPresented: $showAddSaved) {
+            AddSavedSoundSheet { name, provider, link in
+                var cfg = config
+                let source = "external:\(provider):playlist:\(link)"
+                cfg.savedSounds.append(SavedSound(name: name, source: source))
+                controller.configStore.save(cfg)
+            }
+        }
+    }
+
+    private func savedBinding(for id: String) -> Binding<SavedSound> {
+        Binding(
+            get: { config.savedSounds.first { $0.id == id } ?? SavedSound(id: id, name: id, source: "") },
+            set: { newValue in
+                var cfg = controller.configStore.config
+                if let idx = cfg.savedSounds.firstIndex(where: { $0.id == id }) {
+                    cfg.savedSounds[idx] = newValue
+                    controller.configStore.save(cfg)
+                }
+            }
+        )
+    }
+
+    private func deleteSavedSound(_ id: String) {
+        var cfg = config
+        cfg.savedSounds.removeAll { $0.id == id }
+        controller.configStore.save(cfg)
     }
 
     // MARK: Playlists
@@ -122,6 +171,76 @@ struct SoundLibraryPane: View {
             Spacer()
             Text(installed ? "Installed" : "Not installed").font(.caption).foregroundStyle(.secondary)
         }
+    }
+}
+
+private struct SavedSoundRow: View {
+    @Binding var saved: SavedSound
+    let onDelete: () -> Void
+
+    private var providerLabel: String {
+        if saved.source.hasPrefix("external:spotify") { return "Spotify" }
+        if saved.source.hasPrefix("external:appleMusic") { return "Apple Music" }
+        return "Other"
+    }
+
+    /// The link/name payload, for display: the last grammar segment.
+    private var linkText: String {
+        let parts = saved.source.split(separator: ":", maxSplits: 3).map(String.init)
+        return parts.count == 4 ? parts[3] : saved.source
+    }
+
+    var body: some View {
+        HStack {
+            Image(systemName: "link").font(.caption).foregroundStyle(.secondary).frame(width: 20)
+            TextField("Name", text: $saved.name).textFieldStyle(.plain).font(.callout.weight(.medium))
+                .frame(maxWidth: 180)
+            Text(providerLabel)
+                .font(.caption2).padding(.horizontal, 6).padding(.vertical, 2)
+                .background(.quaternary, in: Capsule())
+            Text(linkText)
+                .font(.caption).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
+            Spacer()
+            Button { onDelete() } label: { Image(systemName: "trash") }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+        }
+        .padding(10)
+        .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct AddSavedSoundSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let onAdd: (String, String, String) -> Void
+
+    @State private var name = ""
+    @State private var provider = "appleMusic"
+    @State private var link = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Save a link").font(.headline)
+            TextField("Name (e.g. Deep Focus Mix)", text: $name).textFieldStyle(.roundedBorder)
+            Picker("App", selection: $provider) {
+                Text("Apple Music").tag("appleMusic")
+                Text("Spotify").tag("spotify")
+            }
+            .pickerStyle(.segmented).labelsHidden()
+            TextField("Share link, playlist name, or spotify: URI", text: $link)
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button("Save") {
+                    onAdd(name.isEmpty ? link : name, provider, link)
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(link.isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 420)
     }
 }
 

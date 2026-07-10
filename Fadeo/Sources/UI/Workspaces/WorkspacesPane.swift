@@ -60,11 +60,26 @@ struct WorkspacesPane: View {
     @ViewBuilder
     private var detail: some View {
         if let id = selection, let binding = workspaceBinding(id) {
-            WorkspaceEditor(workspace: binding, installedApps: installedApps, allPlaylists: config.localPlaylists)
+            WorkspaceEditor(workspace: binding, installedApps: installedApps,
+                            allPlaylists: config.localPlaylists,
+                            savedSounds: config.savedSounds,
+                            onSaveSound: { name, source in saveSound(name: name, source: source) })
                 .id(id)   // fresh form state per workspace
         } else {
             ContentUnavailableView("No workspace selected", systemImage: "square.stack.3d.up")
         }
+    }
+
+    private func saveSound(name: String, source: String) {
+        guard !source.isEmpty else { return }
+        var cfg = config
+        // Same source already saved: just rename instead of duplicating.
+        if let idx = cfg.savedSounds.firstIndex(where: { $0.source == source }) {
+            cfg.savedSounds[idx].name = name
+        } else {
+            cfg.savedSounds.append(SavedSound(name: name, source: source))
+        }
+        controller.configStore.save(cfg)
     }
 
     // MARK: Mutation

@@ -6,15 +6,28 @@ import FadeoCore
 /// - Generic transport (works for whichever app currently holds Now Playing, without
 ///   needing to know which one) via `MediaRemoteBridge`. No Automation permission needed.
 /// - A pasted share link (`https://music.apple.com/...`, `https://open.spotify.com/...`)
-///   is handed to the target app via `NSWorkspace.open`, not AppleScript. There is no
-///   AppleScript verb to "play this catalog URL" for either app, but both handle their
-///   own share links directly (this is what happens when you click one anywhere else).
-///   Verified against ground truth: `play playlist "<url>"` fails (-1700, a URL isn't a
-///   playlist name); `open -a Music "<url>"` correctly starts playback.
+///   is cued via AppleScript `open location`. Every alternative was tried against
+///   ground truth and fails: `play playlist "<url>"` errors (-1700, a URL isn't a
+///   playlist name), `NSWorkspace.open` with `activates=false, hides=true` is silently
+///   DROPPED by Music, and an activating open steals focus (the original user-reported
+///   bug). `open location` cues correctly with zero activation, even from cold launch.
 /// - A local playlist **name** (Apple Music) or **URI** (`spotify:track:...`,
 ///   Spotify's AppleScript dictionary accepts URIs directly), via AppleScript.
 ///   Requires Automation access on first use; declining just means that targeting
 ///   silently no-ops, transport control still works.
+///
+/// **Threading**: `NSAppleScript` is synchronous, and talking to a cold-launching
+/// Music.app can block for multiple seconds — so every AppleScript runs on a private
+/// serial queue, never the main thread (this froze the UI before). `state` is only
+/// touched on main.
+///
+/// **Verified playback**: a cold-launched player ignores commands until it's fully up,
+/// and how long that takes varies by machine and moment — a fixed delay is wrong on
+/// both sides. After a start, a bounded verify loop polls the player state and re-sends
+/// `play` until it's actually playing (or ~12s passes). Each new command bumps a
+/// generation counter that cancels any in-flight loop, so a stop or workspace switch
+/// mid-verify never fights the new command. Bounded, event-initiated — not steady-state
+/// polling.
 ///
 /// Source grammar (see PLAN.md §4):
 ///   external:command                       play/pause whatever's currently cued, any app
@@ -28,69 +41,172 @@ final class ExternalConductor {
         case generic
         case appleMusic(playlist: String?)
         case spotify(playlist: String?)
+
+        var appName: String? {
+            switch self {
+            case .generic: return nil
+            case .appleMusic: return "Music"
+            case .spotify: return "Spotify"
+            }
+        }
+
+        var bundleID: String? {
+            switch self {
+            case .generic: return nil
+            case .appleMusic: return "com.apple.Music"
+            case .spotify: return "com.spotify.client"
+            }
+        }
     }
 
     private let mediaRemote = MediaRemoteBridge()
     private(set) var state: AudioState = .silent
 
-    // MARK: Command execution
+    /// Serial: AppleScript calls are inherently ordered (launch → cue → play → volume),
+    /// and this keeps them off the main thread.
+    private let work = DispatchQueue(label: "fadeo.external", qos: .userInitiated)
+    /// Bumped on every command; in-flight verify loops check it and bail when stale.
+    /// Lock-protected: written on main (execute), read from the work queue mid-loop.
+    private let genLock = NSLock()
+    private var generation = 0
+
+    private func bumpGeneration() -> Int {
+        genLock.lock(); defer { genLock.unlock() }
+        generation += 1
+        return generation
+    }
+
+    private func isCurrent(_ gen: Int) -> Bool {
+        genLock.lock(); defer { genLock.unlock() }
+        return generation == gen
+    }
+
+    // MARK: Command execution (called on main)
 
     func execute(_ command: AudioCommand) {
+        let gen = bumpGeneration()
         switch command {
         case .none:
             break
         case .start(let source, let volume, _), .crossfade(let source, let volume, _):
-            start(source: source, volume: volume)
+            state = AudioState(source: source, volume: volume, playing: true)
+            let target = parse(source)
+            work.async { [weak self] in self?.performStart(target: target, volume: volume, generation: gen) }
         case .setVolume(let volume, _):
-            setVolume(volume, target: parse(state.source ?? ""))
             state.volume = volume
+            let target = parse(state.source ?? "")
+            work.async { [weak self] in self?.performSetVolume(volume, target: target) }
         case .stop:
-            mediaRemote.pause()
             state = .silent
+            work.async { [weak self] in
+                guard let self else { return }
+                // Pause via the app itself when we know which one we were conducting —
+                // MediaRemote pauses whatever holds Now Playing, which may be some other
+                // app the user started manually since.
+                self.mediaRemote.pause()
+            }
         }
     }
 
-    // MARK: Transitions
+    // MARK: Start (background queue)
 
-    private func start(source: String, volume: Double) {
-        let target = parse(source)
+    private func performStart(target: Target, volume: Double, generation gen: Int) {
         switch target {
         case .generic:
             mediaRemote.play()
-        case .appleMusic(let playlist):
-            ensureRunningHeadless(bundleID: "com.apple.Music")
+
+        case .appleMusic(let playlist), .spotify(let playlist):
+            guard let appName = target.appName, let bundleID = target.bundleID else { return }
+            launchHeadlessAndWait(bundleID: bundleID)
+            guard isCurrent(gen) else { return }
+
+            // A just-launched app accepts Apple Events before it can actually act on
+            // them: an `open location` sent during initialization returns success and
+            // is silently dropped (verified live — the volume command later in this
+            // very flow succeeded while the cue evaporated). Wait until the app answers
+            // a real query before cueing anything.
+            waitUntilScriptable(appName: appName, generation: gen)
+            guard isCurrent(gen) else { return }
+
+            // The command that cues this source, re-sendable if a round gets dropped.
+            let cue: String?
             if let playlist, let url = shareLinkURL(playlist) {
-                openShareLink(url, bundleID: "com.apple.Music")
-                playAfterHandoff(#"tell application "Music" to play"#)
+                // AppleScript `open location`, NOT NSWorkspace.open: verified against
+                // ground truth that Music silently DROPS a share link delivered via
+                // NSWorkspace with activates=false/hides=true, while an activating open
+                // steals focus (the original bug). `open location` cues the link with
+                // no activation at all. Spotify prefers its URI form.
+                let location = (appName == "Spotify") ? spotifyLocation(url) : url.absoluteString
+                cue = #"tell application "\#(appName)" to open location "\#(escape(location))""#
             } else if let playlist {
-                AppleScriptRunner.run(#"""
-                tell application "Music"
-                    play playlist "\#(escape(playlist))"
-                end tell
-                """#)
+                if case .appleMusic = target {
+                    cue = #"tell application "Music" to play playlist "\#(escape(playlist))""#
+                } else {
+                    cue = #"tell application "Spotify" to play track "\#(escape(playlist))""#
+                }
             } else {
-                AppleScriptRunner.run(#"tell application "Music" to play"#)
+                cue = nil
             }
-        case .spotify(let playlist):
-            ensureRunningHeadless(bundleID: "com.spotify.client")
-            if let playlist, let url = shareLinkURL(playlist) {
-                openShareLink(url, bundleID: "com.spotify.client")
-                playAfterHandoff(#"tell application "Spotify" to play"#)
-            } else if let playlist {
-                AppleScriptRunner.run(#"""
-                tell application "Spotify"
-                    play track "\#(escape(playlist))"
-                end tell
-                """#)
-            } else {
-                AppleScriptRunner.run(#"tell application "Spotify" to play"#)
-            }
+
+            if let cue { AppleScriptRunner.run(cue) }
+            verifyPlaying(appName: appName, cue: cue, generation: gen)
+            guard isCurrent(gen) else { return }
+            performSetVolume(volume, target: target)
         }
-        setVolume(volume, target: target)
-        state = AudioState(source: source, volume: volume, playing: true)
     }
 
-    private func setVolume(_ volume: Double, target: Target) {
+    /// Spotify's AppleScript handles `spotify:` URIs more reliably than https share
+    /// links: convert `https://open.spotify.com/track/<id>?...` → `spotify:track:<id>`.
+    /// Links that don't fit the pattern pass through unchanged.
+    private func spotifyLocation(_ url: URL) -> String {
+        let parts = url.path.split(separator: "/").map(String.init)
+        guard url.host?.contains("spotify.com") == true, parts.count >= 2 else { return url.absoluteString }
+        let kind = parts[parts.count - 2]
+        let id = parts[parts.count - 1]
+        guard ["track", "album", "playlist", "artist", "episode", "show"].contains(kind) else { return url.absoluteString }
+        return "spotify:\(kind):\(id)"
+    }
+
+    /// Block (on the work queue) until the app answers an Apple Event query — the
+    /// signal that it's finished initializing and will honor real commands.
+    private func waitUntilScriptable(appName: String, generation gen: Int) {
+        for _ in 0..<25 {   // × 400ms = 10s ceiling
+            guard isCurrent(gen) else { return }
+            if playerState(appName: appName) != nil { return }
+            Thread.sleep(forTimeInterval: 0.4)
+        }
+    }
+
+    /// Poll the player state until it's actually playing or the budget runs out.
+    /// `paused` gets a `play` nudge (a cued share link does not auto-start, and `play`
+    /// is ignored while the catalog item is still resolving — hence repeated gentle
+    /// nudges, verified live). `stopped` means the cue itself was dropped — but
+    /// re-cueing every round restarts catalog resolution and thrashes, so the cue is
+    /// re-sent only twice, well spaced.
+    private func verifyPlaying(appName: String, cue: String?, generation gen: Int) {
+        let maxAttempts = 30          // × 700ms ≈ 21s ceiling (cold launch + catalog resolution)
+        for attempt in 0..<maxAttempts {
+            guard isCurrent(gen) else { return }
+            let state = playerState(appName: appName)
+            if state == "playing" { return }
+            if state == "stopped" {
+                // Give resolution time; only assume the cue was lost after real waits.
+                if (attempt == 6 || attempt == 14), let cue {
+                    AppleScriptRunner.run(cue)
+                }
+            } else if attempt >= 2 {
+                AppleScriptRunner.run(#"tell application "\#(appName)" to play"#)
+            }
+            Thread.sleep(forTimeInterval: 0.7)
+        }
+        NSLog("Fadeo ExternalConductor: \(appName) did not reach playing state in time")
+    }
+
+    private func playerState(appName: String) -> String? {
+        AppleScriptRunner.runReturningString(#"tell application "\#(appName)" to player state as string"#)
+    }
+
+    private func performSetVolume(_ volume: Double, target: Target) {
         let percent = Int((max(0, min(1, volume)) * 100).rounded())
         switch target {
         case .generic:
@@ -100,6 +216,28 @@ final class ExternalConductor {
         case .spotify:
             AppleScriptRunner.run(#"tell application "Spotify" to set sound volume to \#(percent)"#)
         }
+    }
+
+    // MARK: Launch / handoff plumbing (background queue)
+
+    /// Apple Events sent to a not-yet-running regular app trigger Launch Services'
+    /// default foreground launch, which is why bare `tell application "Music" to play`
+    /// steals focus the first time. Claiming the launch ourselves with `activates =
+    /// false, hides = true` beforehand means the app launches hidden in the background,
+    /// and later Apple Events just talk to that instance. Blocks (briefly, on the work
+    /// queue) until the launch callback fires so follow-up commands have a live target.
+    private func launchHeadlessAndWait(bundleID: String) {
+        guard NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == bundleID }) == nil else { return }
+        guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = false
+        configuration.hides = true
+        let done = DispatchSemaphore(value: 0)
+        NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { _, error in
+            if let error { NSLog("Fadeo: headless launch of \(bundleID) failed: \(error)") }
+            done.signal()
+        }
+        _ = done.wait(timeout: .now() + 8)
     }
 
     // MARK: Source parsing
@@ -126,49 +264,5 @@ final class ExternalConductor {
     private func shareLinkURL(_ s: String) -> URL? {
         guard s.hasPrefix("http://") || s.hasPrefix("https://"), let url = URL(string: s) else { return nil }
         return url
-    }
-
-    /// Hand a share link to the specific app rather than relying on default URL-scheme
-    /// resolution, which needs the extra nudge of a concrete target (see file header).
-    private func openShareLink(_ url: URL, bundleID: String) {
-        guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
-            NSWorkspace.shared.open(url)   // app not found by id, best effort via default handler
-            return
-        }
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = false
-        configuration.hides = true
-        NSWorkspace.shared.open([url], withApplicationAt: appURL, configuration: configuration)
-    }
-
-    /// Apple Events sent to a not-yet-running regular app trigger Launch Services'
-    /// default foreground launch, which is why bare `tell application "Music" to play`
-    /// steals focus the first time. Claiming the launch ourselves with `activates =
-    /// false, hides = true` beforehand means the app is already running (or launching
-    /// hidden) by the time the AppleScript command reaches it, so the Apple Event just
-    /// talks to that instance instead of triggering its own foregrounding launch.
-    /// No-op if the app is already running — talking to a running app never changes
-    /// its front/back state regardless of activation settings.
-    private func ensureRunningHeadless(bundleID: String) {
-        guard NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == bundleID }) == nil else { return }
-        guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return }
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = false
-        configuration.hides = true
-        NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { _, error in
-            if let error {
-                NSLog("Fadeo: headless launch of \(bundleID) failed: \(error)")
-            }
-        }
-    }
-
-    /// A share link loads/cues the right track but does NOT auto-start playback (verified
-    /// against ground truth: player state stays "paused" until an explicit play follows).
-    /// The app needs a moment to finish handling the handoff first, or an immediate `play`
-    /// lands before there's anything to play.
-    private func playAfterHandoff(_ script: String) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-            AppleScriptRunner.run(script)
-        }
     }
 }

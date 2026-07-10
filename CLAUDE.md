@@ -91,6 +91,15 @@ future Conflict Simulator are built on, so don't drop it when refactoring.
 prevents redundant fades/commands firing on every context tick — never bypass it by
 calling the actuator directly from a Decision.
 
+**Switch gating (enter delay / exit delay / minimum dwell) lives in `AppController`, not
+the resolver**: `evaluate()` publishes the live decision immediately (the Now pane always
+shows current reasoning) but only `commit()`s a *switch* after its gate clears — one
+armed `DispatchWorkItem` whose deadline means "the new target held this long". Any
+evaluation re-affirming the current workspace cancels it (the anti-flap semantics),
+overrides bypass the gate entirely (a Meetings pause must be immediate), and nothing is
+gated when no workspace is active (first play is instant). These three settings were
+dead — resolved into `ResolvedTiming` but applied nowhere — until this gate existed.
+
 ### Volume model: exactly one volume concept, not two
 
 Fadeo has **no system-volume control anywhere** (no menu-bar slider, nothing reads/writes
@@ -178,6 +187,21 @@ playlist-targeting + per-app volume baseline via AppleScript
 (`Platform/AppleScriptRunner.swift`). `AppController.applyAudio` tracks which actuator
 (`InternalEngine` vs `ExternalConductor`) currently owns playback via `activeActuator`,
 since `.stop`/`.setVolume` commands don't carry a source string to route by.
+
+`ExternalConductor`'s share-link path is a minefield of verified-against-ground-truth
+constraints — read its header comment before touching it. The short version: all
+AppleScript runs on a private serial queue (`NSAppleScript` is synchronous and a
+cold-launching Music.app blocks it for seconds — this froze the UI when it ran on main);
+share links are cued via AppleScript `open location` (Music silently DROPS a link
+delivered through `NSWorkspace.open` with `activates=false`, and an activating open
+steals focus — the original user-reported bug); the target app is pre-launched hidden and
+then polled until it answers a query, because a just-launched app *accepts* Apple Events
+before it can act on them (an early `open location` returns success and evaporates); and
+playback is then verified by a bounded poll loop that nudges `play` on `paused` but
+re-cues on `stopped` only twice, well-spaced — re-cueing every round restarts catalog
+resolution and the track never starts. Cold-launch-to-audible is ~7s, warm ~2-4s, both
+with zero focus steal. Every one of those behaviors was confirmed live; changing this
+flow without re-running the cold-launch test is how it regresses.
 
 ## UI: six panes, all live-bound to `ConfigStore`
 

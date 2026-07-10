@@ -264,6 +264,30 @@ public struct LocalPlaylist: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
+/// A named, reusable sound source — a saved Apple Music/Spotify link, a preset, a file,
+/// anything in the source grammar. Lets a link be pasted once, named, and reused across
+/// workspaces instead of re-pasted from scratch every time. Picking one copies its
+/// `source` string into the workspace's `Sound` (no runtime indirection to resolve, so
+/// the correctness core stays untouched).
+public struct SavedSound: Codable, Sendable, Equatable, Identifiable {
+    public var id: String
+    public var name: String
+    public var source: String
+
+    public init(id: String = UUID().uuidString, name: String, source: String) {
+        self.id = id
+        self.name = name
+        self.source = source
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? id
+        source = try c.decodeIfPresent(String.self, forKey: .source) ?? ""
+    }
+}
+
 // MARK: - Timing
 
 /// Per-workspace timing overrides. `nil` means "inherit the global default".
@@ -381,9 +405,12 @@ public struct TimingDefaults: Codable, Sendable, Equatable {
     public var exitDelayMs: Int
     public var minDwellMs: Int
 
+    // Enter delay / min dwell were inert until the switch gate shipped; these defaults
+    // are tuned for "deliberate switches feel instant-ish, rapid alt-tab flapping
+    // doesn't yank the audio around". 15s dwell (the old placeholder) reads as broken.
     public init(
         fadeInMs: Int = 800, fadeOutMs: Int = 800, crossfadeMs: Int = 1200,
-        enterDelayMs: Int = 1200, exitDelayMs: Int = 400, minDwellMs: Int = 15000
+        enterDelayMs: Int = 800, exitDelayMs: Int = 400, minDwellMs: Int = 5000
     ) {
         self.fadeInMs = fadeInMs; self.fadeOutMs = fadeOutMs; self.crossfadeMs = crossfadeMs
         self.enterDelayMs = enterDelayMs; self.exitDelayMs = exitDelayMs; self.minDwellMs = minDwellMs
@@ -394,9 +421,9 @@ public struct TimingDefaults: Codable, Sendable, Equatable {
         fadeInMs = try c.decodeIfPresent(Int.self, forKey: .fadeInMs) ?? 800
         fadeOutMs = try c.decodeIfPresent(Int.self, forKey: .fadeOutMs) ?? 800
         crossfadeMs = try c.decodeIfPresent(Int.self, forKey: .crossfadeMs) ?? 1200
-        enterDelayMs = try c.decodeIfPresent(Int.self, forKey: .enterDelayMs) ?? 1200
+        enterDelayMs = try c.decodeIfPresent(Int.self, forKey: .enterDelayMs) ?? 800
         exitDelayMs = try c.decodeIfPresent(Int.self, forKey: .exitDelayMs) ?? 400
-        minDwellMs = try c.decodeIfPresent(Int.self, forKey: .minDwellMs) ?? 15000
+        minDwellMs = try c.decodeIfPresent(Int.self, forKey: .minDwellMs) ?? 5000
     }
 }
 
@@ -448,15 +475,17 @@ public struct Config: Codable, Sendable, Equatable {
     public var settings: Settings
     public var workspaces: [Workspace]
     public var localPlaylists: [LocalPlaylist]
+    public var savedSounds: [SavedSound]
 
     public init(
         version: Int = 1, settings: Settings = Settings(), workspaces: [Workspace] = [],
-        localPlaylists: [LocalPlaylist] = []
+        localPlaylists: [LocalPlaylist] = [], savedSounds: [SavedSound] = []
     ) {
         self.version = version
         self.settings = settings
         self.workspaces = workspaces
         self.localPlaylists = localPlaylists
+        self.savedSounds = savedSounds
     }
 
     public init(from decoder: any Decoder) throws {
@@ -465,5 +494,6 @@ public struct Config: Codable, Sendable, Equatable {
         settings = try c.decodeIfPresent(Settings.self, forKey: .settings) ?? Settings()
         workspaces = try c.decodeIfPresent([Workspace].self, forKey: .workspaces) ?? []
         localPlaylists = try c.decodeIfPresent([LocalPlaylist].self, forKey: .localPlaylists) ?? []
+        savedSounds = try c.decodeIfPresent([SavedSound].self, forKey: .savedSounds) ?? []
     }
 }

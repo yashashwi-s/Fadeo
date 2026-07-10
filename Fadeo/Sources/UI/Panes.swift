@@ -240,7 +240,7 @@ struct AboutPane: View {
     private func openFeedbackEmail() {
         var components = URLComponents()
         components.scheme = "mailto"
-        components.path = "yashashwisinghania@gmail.com"
+        components.path = "fadeo.puremac@gmail.com"
         components.queryItems = [
             URLQueryItem(name: "subject", value: "Fadeo feedback (v\(version))"),
         ]

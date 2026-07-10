@@ -6,6 +6,8 @@ struct WorkspaceEditor: View {
     @Binding var workspace: Workspace
     let installedApps: [InstalledApp]
     let allPlaylists: [LocalPlaylist]
+    var savedSounds: [SavedSound] = []
+    var onSaveSound: ((String, String) -> Void)?
 
     var body: some View {
         ScrollView {
@@ -218,7 +220,8 @@ struct WorkspaceEditor: View {
     private var soundCard: some View {
         Card(title: "Sound") {
             SoundEditor(sound: $workspace.sound, memberApps: workspace.match.apps.map(\.bundle),
-                       installedApps: installedApps, allPlaylists: allPlaylists)
+                       installedApps: installedApps, allPlaylists: allPlaylists,
+                       savedSounds: savedSounds, onSaveSound: onSaveSound)
         }
     }
 
