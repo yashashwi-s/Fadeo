@@ -500,16 +500,20 @@ forever.** Payment funds development and clears the nag; it never unlocks functi
 
 ## 14. Brand & design system
 
-- **Logo:** teal waveform **tapering to nothing** on a slate squircle — literally the
-  *fade* metaphor. Assets produced:
-  - `assets/logo/fadeo-logo.png` (786×776, border removed) — README / in-app / marketing
-  - `assets/logo/fadeo-logo-square-1024.png` — social / avatar
-  - `assets/appicon/fadeo-appicon-1024.png` — app-icon master (keeps macOS safe margin;
-    the AppIcon set / `.icns` is generated from it at M0)
+- **Logo (v2, redesigned):** teal waveform **tapering to nothing** on a slate squircle,
+  literally the *fade* metaphor. Rebuilt from a real superellipse (exponent 5, matching
+  Apple's own icon curvature) rather than a CSS-style rounded-rect, spanning near the
+  full 1024 canvas (macOS does not auto-mask app icons the way iOS does, so the squircle
+  has to be baked into the artwork), with an actual background gradient + soft highlight
+  for depth instead of a flat fill. Source: `assets/redesign/fadeo-icon.svg`, regenerated
+  via `scripts/gen-icon.py` (requires `librsvg`, `brew install librsvg`). Deployed to:
+  - `assets/logo/fadeo-logo.png` / `fadeo-logo-square-1024.png` — README / in-app / social
+  - `assets/appicon/fadeo-appicon-1024.png` — app-icon master (the AppIcon set / `.icns`
+    is generated from it via `scripts/make-assets.sh`)
 - **Palette:** accent **teal `#67E4D2`**, surface **slate `#5A6A7A`**; derive a full
   tonal scale. **Dark-first** (matches the icon), full light mode too.
 - **Motif:** the waveform taper reappears as the **fade-curve editor**, transition
-  animations, and loading states — one visual language throughout.
+  animations, and loading states, one visual language throughout.
 
 ---
 
