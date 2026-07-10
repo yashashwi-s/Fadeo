@@ -237,6 +237,9 @@ struct SoundEditor: View {
             Text("Per-app volume").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
             ForEach(memberApps, id: \.self) { bundle in
                 HStack {
+                    if let icon = installedApps.first(where: { $0.bundleID == bundle })?.icon {
+                        Image(nsImage: icon).resizable().frame(width: 16, height: 16)
+                    }
                     Text(installedApps.first { $0.bundleID == bundle }?.name ?? bundle)
                         .font(.caption)
                     Spacer()

@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import FadeoCore
 
 struct WorkspaceEditor: View {
@@ -71,6 +72,8 @@ struct WorkspaceEditor: View {
             Text("Apps").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
             ForEach(workspace.match.apps.indices, id: \.self) { i in
                 HStack {
+                    Image(nsImage: appIcon(workspace.match.apps[i].bundle))
+                        .resizable().frame(width: 18, height: 18)
                     Text(appName(workspace.match.apps[i].bundle))
                     Spacer()
                     Picker("", selection: $workspace.match.apps[i].strength) {
@@ -86,7 +89,11 @@ struct WorkspaceEditor: View {
             HStack {
                 Menu("Add App") {
                     ForEach(installedApps) { app in
-                        Button(app.name) { addApp(app.bundleID) }
+                        Button {
+                            addApp(app.bundleID)
+                        } label: {
+                            Label { Text(app.name) } icon: { Image(nsImage: app.icon) }
+                        }
                     }
                 }
                 Button("Capture Frontmost") {
@@ -227,6 +234,16 @@ struct WorkspaceEditor: View {
         Card(title: "Timing overrides") {
             TimingEditor(timing: $workspace.timing)
         }
+    }
+
+    private func appIcon(_ bundle: String) -> NSImage {
+        if let app = installedApps.first(where: { $0.bundleID == bundle }) { return app.icon }
+        // Not in the scanned list (e.g. a hand-typed or since-removed bundle id) — ask
+        // LaunchServices directly rather than showing nothing.
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundle) {
+            return NSWorkspace.shared.icon(forFile: url.path)
+        }
+        return NSWorkspace.shared.icon(for: .application)
     }
 
     private func appName(_ bundle: String) -> String {

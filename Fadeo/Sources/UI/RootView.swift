@@ -45,8 +45,14 @@ struct RootView: View {
     // Dev/screenshot-verification hook: FADEO_INITIAL_PANE=<rawValue> jumps straight to a
     // pane at launch without needing UI-click automation. Never set in the shipped app.
     @State private var selection: Pane = Pane(rawValue: ProcessInfo.processInfo.environment["FADEO_INITIAL_PANE"] ?? "") ?? .now
+    @State private var showOnboarding = !OnboardingSheet.hasCompleted
 
     var body: some View {
+        content
+            .sheet(isPresented: $showOnboarding) { OnboardingSheet(isPresented: $showOnboarding) }
+    }
+
+    private var content: some View {
         // Pin the sidebar open (constant visibility) and strip the collapse button below.
         NavigationSplitView(columnVisibility: .constant(.all)) {
             List(Pane.allCases, selection: $selection) { pane in

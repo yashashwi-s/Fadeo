@@ -24,6 +24,7 @@ enum InstalledApps {
         let dirs = [
             "/Applications",
             "/System/Applications",
+            "/System/Applications/Utilities",   // Terminal, Console, Activity Monitor, …
             FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications").path,
         ]
         for dir in dirs {

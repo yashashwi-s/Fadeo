@@ -15,11 +15,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         nc.addObserver(self, selector: #selector(windowsChanged),
                        name: NSWindow.willCloseNotification, object: nil)
 
-        // SwiftUI opens the `Window` scene at launch; close it so we start menu-bar-only.
-        // Dev/screenshot-verification hook: FADEO_OPEN_MAIN_ON_LAUNCH=1 skips the close,
-        // so a headless launch (no click-through automation needed) lands on the main
-        // window. Never set in the shipped app.
-        let keepOpen = ProcessInfo.processInfo.environment["FADEO_OPEN_MAIN_ON_LAUNCH"] == "1"
+        // SwiftUI opens the `Window` scene at launch; close it so we start menu-bar-only —
+        // unless this is the very first launch (onboarding needs the window) or the
+        // screenshot-verification dev hook FADEO_OPEN_MAIN_ON_LAUNCH=1 is set.
+        let keepOpen = !OnboardingSheet.hasCompleted
+            || ProcessInfo.processInfo.environment["FADEO_OPEN_MAIN_ON_LAUNCH"] == "1"
         DispatchQueue.main.async { [weak self] in
             if !keepOpen {
                 for w in NSApp.windows where Self.isAppWindow(w) { w.close() }
