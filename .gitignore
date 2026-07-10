@@ -1,0 +1,38 @@
+# macOS
+.DS_Store
+*.swp
+
+# Xcode
+xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+build/
+*.xcuserstate
+*.moved-aside
+
+# XcodeGen output (regenerated from project.yml — do not commit)
+Fadeo.xcodeproj/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Packages/*/.build/
+Package.resolved
+
+# Signing / secrets — never commit
+*.p12
+*.cer
+*.provisionprofile
+*.mobileprovision
+ExportOptions.plist
+.env
+secrets/
+fastlane/report.xml
+
+# Sparkle / release artifacts
+dist/
+*.dmg
+*.zip
+
+# Claude Code local settings
+.claude/settings.local.json
