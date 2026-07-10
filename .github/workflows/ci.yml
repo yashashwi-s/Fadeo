@@ -49,6 +49,14 @@ jobs:
         working-directory: ${{ env.CI_VOLUME }}/Fadeo
         run: xcodegen generate
 
+      - name: Resolve Package Dependencies
+        working-directory: ${{ env.CI_VOLUME }}/Fadeo
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project Fadeo.xcodeproj \
+            -scheme Fadeo \
+            -derivedDataPath build
+
       - name: Build
         working-directory: ${{ env.CI_VOLUME }}/Fadeo
         run: |
