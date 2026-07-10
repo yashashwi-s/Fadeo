@@ -99,8 +99,19 @@ struct NowPane: View {
         Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 8) {
             row("Uptime", controller.uptimeString)
             row("Events observed", "\(controller.eventCount)")
+            row("Active sensors", "\(activeSensorCount) of \(controller.sensorStatuses.count)")
+            row("Memory (RSS)", memoryLabel)
             row("Steady-state polling", "none — all OS push")
         }
+    }
+
+    private var activeSensorCount: Int {
+        controller.sensorStatuses.filter(\.running).count
+    }
+
+    private var memoryLabel: String {
+        guard let mb = ProcessStats.residentMemoryMB() else { return "unavailable" }
+        return String(format: "%.1f MB", mb)
     }
 
     private var events: some View {

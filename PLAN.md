@@ -578,9 +578,9 @@ test loop; OS glue is thin and swappable.
 | **M2** | **Precedence engine** (4 bands + tiebreak chain) + **Conflict Simulator**; `ExternalConductor` (MediaRemote + Spotify/Music) | the deep customization + conducting real players |
 | **M3** ✅ | Remaining v1 sensors: Space (CGS shim) · Meeting (cam/mic) · Focus/Schedule (FSEvents + boundary timer). Also: real lazy sensor activation (a sensor starts only if an enabled workspace's `match` needs its fields) | all four triggers live |
 | **M4** ✅ | Full **Workspace editor UI** + Sound Library + Precedence UI + Conflict Simulator + Triggers UI (live sensor status) + two-way YAML editor | both halves of the customizability pillar |
-| **M5** | **Licensing** (offline Ed25519, 14-day trial, $2, two-path soft nag) · opt-in **usage diagnostics** · **notifications** (`UNUserNotificationCenter`) · Sparkle updater · permissions wizard · notarization · **energy audit** · brand pass | shippable, paid, polished |
+| **M5** (core done ✅, monetization/packaging deferred) | Done: **permissions/onboarding** (one-screen, real permission surface) · **energy dashboard** (self-reported RSS + active sensor count in the Now pane) · real app icons throughout the Workspace editor. **Deferred to a later stage, by user decision (no Apple Developer ID yet; "complete the core features first")**: licensing ($2/14-day trial/soft nag), usage diagnostics, notifications, Sparkle updater, notarization/signing, brand/logo redesign (user is redesigning it personally) | core app is feature-complete; monetization + distribution are the remaining work |
 | Later | Idle · browser URL · network/SSID · battery · headphones · calendar sensors; preset library; per-output-device routing; workspace import/share | breadth |
-| Site | **PureMac hub** (`puremac.yashashwi.me/fadeo`): storefront, download + Sparkle appcast, purchase, capped free-license generator, diagnostics dashboard | separate track, post-M5 |
+| Site | **PureMac hub** (`puremac.yashashwi.me/fadeo`): storefront, download + Sparkle appcast, purchase, capped free-license generator, diagnostics dashboard | separate track, post-M5, blocked on Developer ID + hosting |
 
 ---
 
