@@ -32,6 +32,19 @@ jobs:
       - name: Generate Xcode Project
         run: xcodegen generate
 
+      - name: Resolve Package Dependencies
+        # Separate, isolated step: xcodebuild's package checkout + its own per-package
+        # scratch "build" directory creation is a known resolve-vs-build race on the
+        # older xcodebuild that ships with this runner's Xcode, and Yams ships a
+        # top-level Bazel BUILD file that collides with that directory on macOS's
+        # case-insensitive filesystem. Resolving fully first (so the checkout settles
+        # before the actual build step runs) avoids it.
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project Fadeo.xcodeproj \
+            -scheme Fadeo \
+            -derivedDataPath build
+
       - name: Build
         run: |
           xcodebuild \
