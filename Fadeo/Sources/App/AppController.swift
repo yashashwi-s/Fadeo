@@ -17,7 +17,13 @@ final class AppController: ObservableObject {
     @Published var automationPaused = false {
         didSet {
             if automationPaused {
-                engine.execute(.stop(fadeMs: configStore.config.settings.defaults.fadeOutMs))
+                let stop = AudioCommand.stop(fadeMs: configStore.config.settings.defaults.fadeOutMs)
+                switch activeActuator {
+                case .internalEngine: engine.execute(stop)
+                case .external: external.execute(stop)
+                case .none: break
+                }
+                activeActuator = .none
                 audioState = .silent
                 updateAudioStatus()
             } else {
@@ -32,8 +38,13 @@ final class AppController: ObservableObject {
 
     // Audio actuation
     private let engine = InternalEngine()
+    private let external = ExternalConductor()
     private let reconciler = Reconciler()
     private var audioState: AudioState = .silent
+    /// Which actuator currently owns playback — needed because `.stop`/`.setVolume`
+    /// commands don't carry a source string, so we route by "whoever's playing".
+    private enum Actuator: Equatable { case none, internalEngine, external }
+    private var activeActuator: Actuator = .none
 
     // Master level == the macOS system volume (single source of truth; see PLAN.md 6a).
     let systemVolume = SystemVolume()
@@ -128,15 +139,30 @@ final class AppController: ObservableObject {
     // MARK: Audio
 
     private func applyAudio(_ d: Decision) {
-        var target = d.target
-        // M1: external players aren't wired yet (that's M2). Rather than pretend, silence
-        // the internal engine when a rule asks for an external source.
-        if target.action == .play, let s = target.source, s.hasPrefix("external:") {
-            target = AudioTarget(source: nil, action: .stop, volume: 0)
+        let target = d.target
+        let command = reconciler.reconcile(current: audioState, target: target, transition: d.transition)
+
+        // Decide which actuator this command belongs to. A start/crossfade names its
+        // source explicitly; a bare stop/setVolume applies to whichever actuator is
+        // already playing (a rule never targets both at once).
+        let destination: Actuator
+        switch command {
+        case .start(let s, _, _), .crossfade(let s, _, _):
+            destination = s.hasPrefix("external:") ? .external : .internalEngine
+        case .setVolume, .stop:
+            destination = activeActuator
+        case .none:
+            destination = activeActuator
         }
 
-        let command = reconciler.reconcile(current: audioState, target: target, transition: d.transition)
-        engine.execute(command)
+        switch destination {
+        case .internalEngine: engine.execute(command)
+        case .external: external.execute(command)
+        case .none: break
+        }
+        if case .start = command { activeActuator = destination }
+        if case .crossfade = command { activeActuator = destination }
+        if case .stop = command { activeActuator = .none }
 
         // Optimistically mirror the command into our tracked state (matches the reconciler's
         // model, so we don't re-issue the same fade every context tick).
@@ -154,15 +180,13 @@ final class AppController: ObservableObject {
     }
 
     private func updateAudioStatus() {
-        if audioState.playing, let s = audioState.source {
-            let name = s.split(separator: ":").last.map(String.init) ?? s
-            audioStatus = "playing \(name) · \(Int(audioState.volume * 100))%"
-        } else if let d = decision, d.target.action == .play,
-                  let s = d.target.source, s.hasPrefix("external:") {
-            audioStatus = "→ external player (M2)"
-        } else {
+        guard audioState.playing, let s = audioState.source else {
             audioStatus = "silent"
+            return
         }
+        let name = s.split(separator: ":").last.map(String.init) ?? s
+        let via = activeActuator == .external ? "external · " : ""
+        audioStatus = "playing \(via)\(name) · \(Int(audioState.volume * 100))%"
     }
 
     private func timestamp() -> String {
