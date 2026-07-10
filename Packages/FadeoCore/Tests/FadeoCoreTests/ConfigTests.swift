@@ -26,6 +26,19 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(w.sound.action, .play)
     }
 
+    func testSoundOrderAndRepeatDefaults() {
+        let s = Sound(source: "internal:folder:/x")
+        XCTAssertEqual(s.order, .sequential)
+        XCTAssertEqual(s.repeatMode, .all)
+    }
+
+    func testLocalPlaylistRoundTrips() throws {
+        let cfg = Config(localPlaylists: [LocalPlaylist(id: "focus", name: "Focus", paths: ["/a.mp3", "/b.wav"])])
+        let data = try ConfigCodec.encode(cfg)
+        let back = try ConfigCodec.decode(data)
+        XCTAssertEqual(back.localPlaylists, cfg.localPlaylists)
+    }
+
     func testTimingResolvesOverDefaults() {
         let d = TimingDefaults(fadeInMs: 800, fadeOutMs: 800)
         let t = Timing(fadeInMs: 1200).resolved(over: d)

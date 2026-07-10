@@ -6,11 +6,19 @@ public struct AudioTarget: Sendable, Equatable {
     public var source: String?
     public var action: SoundAction
     public var volume: Double
+    /// Only meaningful for multi-file internal sources (folder/playlist).
+    public var order: PlaybackOrder
+    public var repeatMode: RepeatMode
 
-    public init(source: String? = nil, action: SoundAction = .doNothing, volume: Double = 1.0) {
+    public init(
+        source: String? = nil, action: SoundAction = .doNothing, volume: Double = 1.0,
+        order: PlaybackOrder = .sequential, repeatMode: RepeatMode = .all
+    ) {
         self.source = source
         self.action = action
         self.volume = volume
+        self.order = order
+        self.repeatMode = repeatMode
     }
 }
 
@@ -233,7 +241,9 @@ public struct Resolver {
         let target = AudioTarget(
             source: override?.source ?? ws.sound.source,
             action: ws.sound.action,
-            volume: override?.volume ?? ws.sound.volume
+            volume: override?.volume ?? ws.sound.volume,
+            order: ws.sound.order,
+            repeatMode: ws.sound.repeatMode
         )
         let timing = ws.timing.resolved(over: config.settings.defaults)
         return Decision(

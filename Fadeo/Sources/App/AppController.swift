@@ -62,10 +62,15 @@ final class AppController: ObservableObject {
     init(configStore: ConfigStore) {
         self.configStore = configStore
 
+        engine.updateLocalPlaylists(configStore.config.localPlaylists)
+
         // Re-evaluate whenever the config hot-reloads.
         configStore.$config
             .dropFirst()
-            .sink { [weak self] _ in self?.evaluate() }
+            .sink { [weak self] cfg in
+                self?.engine.updateLocalPlaylists(cfg.localPlaylists)
+                self?.evaluate()
+            }
             .store(in: &cancellables)
 
         // Master volume mirrors the system volume, live.
@@ -156,7 +161,7 @@ final class AppController: ObservableObject {
         }
 
         switch destination {
-        case .internalEngine: engine.execute(command)
+        case .internalEngine: engine.execute(command, order: target.order, repeatMode: target.repeatMode)
         case .external: external.execute(command)
         case .none: break
         }

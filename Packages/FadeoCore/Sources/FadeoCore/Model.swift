@@ -182,6 +182,18 @@ public enum SoundAction: String, Codable, Sendable {
     case play, pause, stop, setVolume, duck, resumePrevious, doNothing
 }
 
+/// Playback order for a multi-file source (`internal:folder:` / `internal:playlist:`).
+public enum PlaybackOrder: String, Codable, Sendable {
+    case sequential, shuffle
+}
+
+/// What happens when a multi-file (or single-file) source runs out.
+public enum RepeatMode: String, Codable, Sendable {
+    case off    // play through once, then fall silent
+    case one    // loop the current track
+    case all    // loop the whole queue (default — matches "ambient background" expectations)
+}
+
 public struct PerAppOverride: Codable, Sendable, Equatable {
     public var volume: Double?
     public var source: String?
@@ -193,22 +205,30 @@ public struct PerAppOverride: Codable, Sendable, Equatable {
 }
 
 public struct Sound: Codable, Sendable, Equatable {
-    /// e.g. "internal:preset:brown-noise", "external:spotify:playlist:<id>". `nil` for pause/stop.
+    /// e.g. "internal:preset:brown-noise", "internal:file:<path>", "internal:folder:<path>",
+    /// "internal:playlist:<id>", "external:spotify:playlist:<id>". `nil` for pause/stop.
     public var source: String?
     public var action: SoundAction
     public var volume: Double
     public var perApp: [String: PerAppOverride]
+    /// Only meaningful for multi-file sources (folder/playlist) — ignored otherwise.
+    public var order: PlaybackOrder
+    public var repeatMode: RepeatMode
 
     public init(
         source: String? = nil,
         action: SoundAction = .play,
         volume: Double = 1.0,
-        perApp: [String: PerAppOverride] = [:]
+        perApp: [String: PerAppOverride] = [:],
+        order: PlaybackOrder = .sequential,
+        repeatMode: RepeatMode = .all
     ) {
         self.source = source
         self.action = action
         self.volume = volume
         self.perApp = perApp
+        self.order = order
+        self.repeatMode = repeatMode
     }
 
     public init(from decoder: any Decoder) throws {
@@ -217,6 +237,30 @@ public struct Sound: Codable, Sendable, Equatable {
         self.action = try c.decodeIfPresent(SoundAction.self, forKey: .action) ?? .play
         self.volume = try c.decodeIfPresent(Double.self, forKey: .volume) ?? 1.0
         self.perApp = try c.decodeIfPresent([String: PerAppOverride].self, forKey: .perApp) ?? [:]
+        self.order = try c.decodeIfPresent(PlaybackOrder.self, forKey: .order) ?? .sequential
+        self.repeatMode = try c.decodeIfPresent(RepeatMode.self, forKey: .repeatMode) ?? .all
+    }
+}
+
+/// A user-curated set of specific local files — the "select a few tracks from a folder"
+/// case. Referenced by a workspace as `internal:playlist:<id>`. Paths are absolute;
+/// resolving/scanning is an app-layer concern, this is just the pure data.
+public struct LocalPlaylist: Codable, Sendable, Equatable, Identifiable {
+    public var id: String
+    public var name: String
+    public var paths: [String]
+
+    public init(id: String, name: String, paths: [String]) {
+        self.id = id
+        self.name = name
+        self.paths = paths
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? id
+        paths = try c.decodeIfPresent([String].self, forKey: .paths) ?? []
     }
 }
 
@@ -403,11 +447,16 @@ public struct Config: Codable, Sendable, Equatable {
     public var version: Int
     public var settings: Settings
     public var workspaces: [Workspace]
+    public var localPlaylists: [LocalPlaylist]
 
-    public init(version: Int = 1, settings: Settings = Settings(), workspaces: [Workspace] = []) {
+    public init(
+        version: Int = 1, settings: Settings = Settings(), workspaces: [Workspace] = [],
+        localPlaylists: [LocalPlaylist] = []
+    ) {
         self.version = version
         self.settings = settings
         self.workspaces = workspaces
+        self.localPlaylists = localPlaylists
     }
 
     public init(from decoder: any Decoder) throws {
@@ -415,5 +464,6 @@ public struct Config: Codable, Sendable, Equatable {
         version = try c.decodeIfPresent(Int.self, forKey: .version) ?? 1
         settings = try c.decodeIfPresent(Settings.self, forKey: .settings) ?? Settings()
         workspaces = try c.decodeIfPresent([Workspace].self, forKey: .workspaces) ?? []
+        localPlaylists = try c.decodeIfPresent([LocalPlaylist].self, forKey: .localPlaylists) ?? []
     }
 }

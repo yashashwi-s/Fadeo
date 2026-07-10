@@ -2,27 +2,67 @@ import Foundation
 import AVFoundation
 import FadeoCore
 
-/// Fadeo's self-contained player. For the ambient starter set we *synthesize* the sound
-/// in a real-time render block (brown/pink/white noise) — no shipped audio files, tiny
-/// footprint, and infinite length with no looping seams. Local files & external players
-/// come later (M2). Fades are sample-accurate; the engine is fully stopped when idle so
-/// it drops to ~0% CPU and releases the audio hardware.
+/// Fadeo's self-contained player. Two independent playback paths share one
+/// `AVAudioEngine`, mutually exclusive at any moment (Fadeo plays one thing at a time):
+///
+/// - **Ambient presets** (`internal:preset:*`) are *synthesized* in a real-time render
+///   block (brown/pink/white noise) — no shipped audio files, seamless, tiny footprint.
+/// - **Your own audio** (`internal:file:<path>`, `internal:folder:<path>`,
+///   `internal:playlist:<id>`) is played via `AVAudioPlayerNode`, queued and ordered per
+///   the workspace's `order`/`repeatMode` — this is the "bring your own sound" pillar.
+///
+/// Fades are sample-accurate for the noise path and a short bounded timer-driven ramp for
+/// the file path (AVAudioMixerNode has no ramping API of its own). The engine is fully
+/// stopped when idle so it drops to ~0% CPU and releases the audio hardware.
 final class InternalEngine {
 
+    private enum SourceKind: Equatable { case preset, files }
+
     private let engine = AVAudioEngine()
-    private let renderer = NoiseRenderer()
-    private var sourceNode: AVAudioSourceNode?
     private let sampleRate: Double = 48_000
-    private var configured = false
+    private var format: AVAudioFormat?
+
+    // Noise path
+    private let renderer = NoiseRenderer()
+    private var noiseNode: AVAudioSourceNode?
+    private var noiseConfigured = false
+
+    // File path
+    private var playerNode: AVAudioPlayerNode?
+    private let fileMixer = AVAudioMixerNode()
+    private var fileConfigured = false
+    private var queue: [URL] = []
+    private var queueIndex = 0
+    private var order: PlaybackOrder = .sequential
+    private var repeatMode: RepeatMode = .all
+    private var fadeTimer: DispatchSourceTimer?
+    /// Guards against a completion handler from a *stale* schedule (e.g. after a stop or
+    /// a switch to a different source) advancing a queue that's no longer current.
+    private var playbackGeneration = 0
+
+    private var localPlaylists: [LocalPlaylist] = []
+    private var activeKind: SourceKind?
 
     /// Scheduled work for the second half of a crossfade / the end of a fade-out.
     private var pendingWork: DispatchWorkItem?
 
     private(set) var state: AudioState = .silent
 
+    private static let supportedExtensions: Set<String> = [
+        "mp3", "m4a", "aac", "wav", "aiff", "aif", "flac", "alac", "caf",
+    ]
+
+    /// The app calls this whenever config reloads so folder/playlist sources always
+    /// resolve against the current definitions.
+    func updateLocalPlaylists(_ playlists: [LocalPlaylist]) {
+        localPlaylists = playlists
+    }
+
     // MARK: Command execution (called on main from the AppController)
 
-    func execute(_ command: AudioCommand) {
+    func execute(_ command: AudioCommand, order: PlaybackOrder = .sequential, repeatMode: RepeatMode = .all) {
+        self.order = order
+        self.repeatMode = repeatMode
         switch command {
         case .none:
             break
@@ -31,8 +71,7 @@ final class InternalEngine {
         case .crossfade(let source, let volume, let ms):
             crossfade(to: source, volume: volume, ms: ms)
         case .setVolume(let volume, let ms):
-            renderer.setRamp(to: calibratedGain(volume, source: state.source ?? ""), ms: ms, sampleRate: sampleRate)
-            state.volume = volume
+            setVolume(volume, ms: ms)
         case .stop(let fadeMs):
             stop(fadeMs: fadeMs)
         }
@@ -42,16 +81,211 @@ final class InternalEngine {
 
     private func start(source: String, volume: Double, fadeMs: Int) {
         pendingWork?.cancel(); pendingWork = nil
-        renderer.kind = NoiseRenderer.Kind(source: source)
-        configureIfNeeded()
-        startEngineIfNeeded()
-        renderer.setRamp(to: calibratedGain(volume, source: source), ms: fadeMs, sampleRate: sampleRate)
-        state = AudioState(source: source, volume: volume, playing: true)
+        let kind = sourceKind(source)
+
+        switch kind {
+        case .preset:
+            stopFilePlaybackImmediate()
+            configureNoiseIfNeeded()
+            startEngineIfNeeded()
+            renderer.kind = NoiseRenderer.Kind(source: source)
+            renderer.setRamp(to: calibratedGain(volume, source: source), ms: fadeMs, sampleRate: sampleRate)
+            activeKind = .preset
+            state = AudioState(source: source, volume: volume, playing: true)
+
+        case .files:
+            silenceNoiseImmediate()
+            let urls = resolveQueue(source)
+            guard !urls.isEmpty else {
+                NSLog("Fadeo InternalEngine: no playable files for source \(source)")
+                activeKind = nil
+                state = .silent
+                return
+            }
+            queue = order == .shuffle ? urls.shuffled() : urls
+            queueIndex = 0
+            configureFileIfNeeded()
+            startEngineIfNeeded()
+            activeKind = .files
+            state = AudioState(source: source, volume: volume, playing: true)
+            playCurrentQueueItem(fadeInMs: fadeMs)
+        }
+    }
+
+    private func crossfade(to source: String, volume: Double, ms: Int) {
+        pendingWork?.cancel()
+        // Invalidate any in-flight natural track-advance now, not when the delayed swap
+        // fires — otherwise a track finishing during the fade-out window snaps the volume
+        // back to full, fighting the fade. See git history for how this was caught.
+        playbackGeneration += 1
+        let half = max(1, ms / 2)
+
+        switch activeKind {
+        case .preset: renderer.setRamp(to: 0, ms: half, sampleRate: sampleRate)
+        case .files:  rampFileVolume(to: 0, ms: half)
+        case nil:     break
+        }
+
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.silenceNoiseImmediate()
+            self.stopFilePlaybackImmediate()
+            self.start(source: source, volume: volume, fadeMs: half)
+        }
+        pendingWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(half), execute: work)
+    }
+
+    private func setVolume(_ volume: Double, ms: Int) {
+        switch activeKind {
+        case .preset:
+            renderer.setRamp(to: calibratedGain(volume, source: state.source ?? ""), ms: ms, sampleRate: sampleRate)
+        case .files:
+            rampFileVolume(to: Float(volume), ms: ms)
+        case nil:
+            break
+        }
+        state.volume = volume
+    }
+
+    private func stop(fadeMs: Int) {
+        pendingWork?.cancel()
+        playbackGeneration += 1   // same reasoning as crossfade above
+        switch activeKind {
+        case .preset: renderer.setRamp(to: 0, ms: fadeMs, sampleRate: sampleRate)
+        case .files:  rampFileVolume(to: 0, ms: fadeMs)
+        case nil:     break
+        }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.playerNode?.stop()
+            self.playbackGeneration += 1
+            self.engine.stop()               // release the audio HAL → ~0% CPU when idle
+            self.activeKind = nil
+            self.state = .silent
+        }
+        pendingWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(max(0, fadeMs)), execute: work)
+    }
+
+    // MARK: File queue playback
+
+    private func playCurrentQueueItem(fadeInMs: Int) {
+        guard let node = playerNode, queue.indices.contains(queueIndex) else { return }
+        let url = queue[queueIndex]
+        guard let file = try? AVAudioFile(forReading: url) else {
+            NSLog("Fadeo InternalEngine: could not open \(url.lastPathComponent), skipping")
+            advancePastUnplayable()
+            return
+        }
+        playbackGeneration += 1
+        let generation = playbackGeneration
+        node.scheduleFile(file, at: nil) { [weak self] in
+            DispatchQueue.main.async {
+                self?.handleTrackFinished(generation: generation)
+            }
+        }
+        if !node.isPlaying { node.play() }
+        // Read state.volume live (not a value captured earlier in the completion chain) so
+        // a setVolume that happened mid-track is respected on the next auto-advance.
+        rampFileVolume(to: Float(state.volume), ms: fadeInMs)
+    }
+
+    private func advancePastUnplayable() {
+        guard !queue.isEmpty else { return }
+        queueIndex = (queueIndex + 1) % queue.count
+        playCurrentQueueItem(fadeInMs: 0)
+    }
+
+    private func handleTrackFinished(generation: Int) {
+        // A stop/crossfade already invalidated this schedule (bumped playbackGeneration
+        // the instant it was requested, not when it completes) — do nothing, so a track
+        // finishing mid-fade-out never snaps the volume back up.
+        guard generation == playbackGeneration, activeKind == .files else { return }
+        switch repeatMode {
+        case .one:
+            break   // replay the same index
+        case .all:
+            queueIndex = (queueIndex + 1) % queue.count
+        case .off:
+            queueIndex += 1
+            guard queue.indices.contains(queueIndex) else {
+                activeKind = nil
+                state = .silent
+                return
+            }
+        }
+        playCurrentQueueItem(fadeInMs: 0)
+    }
+
+    // MARK: Volume ramp (file path — AVAudioMixerNode has no built-in ramping)
+
+    private func rampFileVolume(to target: Float, ms: Int) {
+        fadeTimer?.cancel(); fadeTimer = nil
+        guard ms > 0 else { fileMixer.outputVolume = target; return }
+        let start = fileMixer.outputVolume
+        let stepMs = 16
+        let steps = max(1, ms / stepMs)
+        var step = 0
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + .milliseconds(stepMs), repeating: .milliseconds(stepMs))
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            step += 1
+            if step >= steps {
+                self.fileMixer.outputVolume = target
+                self.fadeTimer?.cancel(); self.fadeTimer = nil
+            } else {
+                self.fileMixer.outputVolume = start + (target - start) * Float(step) / Float(steps)
+            }
+        }
+        fadeTimer = timer
+        timer.resume()
+    }
+
+    // MARK: Source resolution (pure-ish; touches the filesystem, stays app-side by design)
+
+    private func sourceKind(_ source: String) -> SourceKind {
+        source.hasPrefix("internal:preset:") ? .preset : .files
+    }
+
+    private func resolveQueue(_ source: String) -> [URL] {
+        let parts = source.split(separator: ":", maxSplits: 2).map(String.init)
+        guard parts.count == 3, parts[0] == "internal" else { return [] }
+        switch parts[1] {
+        case "file":
+            let url = URL(fileURLWithPath: parts[2])
+            return FileManager.default.fileExists(atPath: url.path) ? [url] : []
+        case "folder":
+            return filesInFolder(parts[2])
+        case "playlist":
+            return filesInPlaylist(parts[2])
+        default:
+            return []
+        }
+    }
+
+    private func filesInFolder(_ path: String) -> [URL] {
+        let url = URL(fileURLWithPath: path)
+        guard let items = try? FileManager.default.contentsOfDirectory(
+            at: url, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        ) else { return [] }
+        return items
+            .filter { Self.supportedExtensions.contains($0.pathExtension.lowercased()) }
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+    }
+
+    private func filesInPlaylist(_ id: String) -> [URL] {
+        guard let playlist = localPlaylists.first(where: { $0.id == id }) else { return [] }
+        return playlist.paths
+            .map { URL(fileURLWithPath: $0) }
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
     }
 
     /// Perceptual calibration so equal baseline numbers sound equally loud across noise
     /// textures (white reads far louder than brown at the same RMS). Does NOT include the
-    /// system volume — the hardware applies that (PLAN.md 6a).
+    /// system volume — the hardware applies that (PLAN.md 6a). Not applied to user files:
+    /// they're pre-mastered content, not our synthesized noise.
     private func calibratedGain(_ volume: Double, source: String) -> Float {
         let cal: Float
         switch NoiseRenderer.Kind(source: source) {
@@ -62,48 +296,39 @@ final class InternalEngine {
         return Float(volume) * cal
     }
 
-    private func crossfade(to source: String, volume: Double, ms: Int) {
-        pendingWork?.cancel()
-        let half = max(1, ms / 2)
-        // Fade the outgoing texture down…
-        renderer.setRamp(to: 0, ms: half, sampleRate: sampleRate)
-        let work = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            // …swap texture at the trough, fade the incoming one up.
-            self.renderer.kind = NoiseRenderer.Kind(source: source)
-            self.renderer.setRamp(to: self.calibratedGain(volume, source: source), ms: half, sampleRate: self.sampleRate)
-            self.state = AudioState(source: source, volume: volume, playing: true)
-        }
-        pendingWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(half), execute: work)
-    }
-
-    private func stop(fadeMs: Int) {
-        pendingWork?.cancel()
-        renderer.setRamp(to: 0, ms: fadeMs, sampleRate: sampleRate)
-        let work = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            self.engine.stop()               // release the audio HAL → ~0% CPU when idle
-            self.state = .silent
-        }
-        pendingWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(max(0, fadeMs)), execute: work)
-    }
-
     // MARK: Engine setup
 
-    private func configureIfNeeded() {
-        guard !configured else { return }
-        guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2) else { return }
-        let node = AVAudioSourceNode(format: format) { [renderer] _, _, frameCount, ablPtr in
+    private func sharedFormat() -> AVAudioFormat {
+        if let format { return format }
+        let f = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2)!
+        format = f
+        return f
+    }
+
+    private func configureNoiseIfNeeded() {
+        guard !noiseConfigured else { return }
+        let fmt = sharedFormat()
+        let node = AVAudioSourceNode(format: fmt) { [renderer] _, _, frameCount, ablPtr in
             let abl = UnsafeMutableAudioBufferListPointer(ablPtr)
             renderer.render(frameCount: Int(frameCount), abl: abl)
             return noErr
         }
         engine.attach(node)
-        engine.connect(node, to: engine.mainMixerNode, format: format)
-        sourceNode = node
-        configured = true
+        engine.connect(node, to: engine.mainMixerNode, format: fmt)
+        noiseNode = node
+        noiseConfigured = true
+    }
+
+    private func configureFileIfNeeded() {
+        guard !fileConfigured else { return }
+        let fmt = sharedFormat()
+        let node = AVAudioPlayerNode()
+        engine.attach(node)
+        engine.attach(fileMixer)
+        engine.connect(node, to: fileMixer, format: fmt)
+        engine.connect(fileMixer, to: engine.mainMixerNode, format: fmt)
+        playerNode = node
+        fileConfigured = true
     }
 
     private func startEngineIfNeeded() {
@@ -114,6 +339,18 @@ final class InternalEngine {
         } catch {
             NSLog("Fadeo InternalEngine: engine start failed: \(error.localizedDescription)")
         }
+    }
+
+    private func silenceNoiseImmediate() {
+        guard noiseConfigured else { return }
+        renderer.setRamp(to: 0, ms: 0, sampleRate: sampleRate)
+    }
+
+    private func stopFilePlaybackImmediate() {
+        fadeTimer?.cancel(); fadeTimer = nil
+        playbackGeneration += 1
+        playerNode?.stop()
+        fileMixer.outputVolume = 0
     }
 }
 

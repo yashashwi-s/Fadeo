@@ -158,13 +158,35 @@ flags: `override` (pre-empt band) and per-app `strength` (`strong` vs `weak`).
 
 **Sources** (any workspace): `external:spotify:playlist:<id>`, `external:appleMusic:<id>`,
 `external:command` (just play/pause whatever's playing), `internal:file:<path>`,
-`internal:preset:<name>` (rain / brown-noise / lofi / …). **Actions:** `play`, `pause`,
-`stop`, `setVolume`, `duck`, `resumePrevious`, `doNothing`.
+`internal:folder:<path>`, `internal:playlist:<id>`, `internal:preset:<name>` (rain /
+brown-noise / lofi / …). **Actions:** `play`, `pause`, `stop`, `setVolume`, `duck`,
+`resumePrevious`, `doNothing`.
 
 **Source philosophy — DECIDED: bring-your-own first.** The core attitude is *your* sound:
 your Spotify/Apple Music playlists and your own files/folders. We *also* bundle a small
 royalty-free **starter set** (rain, brown/pink noise, lo-fi loops) so a fresh install
 makes sound immediately — but BYO is the headline, presets are the on-ramp.
+
+**Local playback — DECIDED, implemented: three granularities, so "your own files" means
+exactly what the user wants it to mean, not just "one file":**
+- `internal:file:<path>` — a single file.
+- `internal:folder:<path>` — every supported audio file in that folder (non-recursive),
+  in filename order or shuffled.
+- `internal:playlist:<id>` — a **user-curated subset** of specific files, referenced by
+  id against `Config.localPlaylists` (`LocalPlaylist { id, name, paths }`). This is the
+  "select a few tracks from a folder" case — an explicit, user-picked list rather than a
+  filter rule, so it's exactly as customizable as the user wants (a GUI picker to build
+  these lands with the Sound Library pane in M4; the data model exists now).
+
+**Playback order & repeat — genuine per-workspace controls, not hardcoded**, via
+`Sound.order` (`sequential` | `shuffle`) and `Sound.repeatMode` (`off` | `one` | `all`,
+default `all` so ambient folders/playlists loop naturally). Only meaningful for
+multi/single-file internal sources; ignored for presets and external sources (those apps
+manage their own playback order).
+
+Streaming (Spotify/Apple Music) and local playback are peers, not alternatives — a
+workspace picks whichever `source` fits, and different workspaces can freely mix the two
+(e.g. "Deep Work" plays a local folder, "Commute" plays a Spotify playlist).
 
 ---
 
