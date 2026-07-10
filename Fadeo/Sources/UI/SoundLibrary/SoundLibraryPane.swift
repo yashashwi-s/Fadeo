@@ -2,8 +2,8 @@ import SwiftUI
 import AppKit
 import FadeoCore
 
-/// Manage local playlists (the "curated subset of files" case, PLAN.md §4), see the
-/// bundled ambient presets, and check which external players are available to conduct.
+/// The sound library: saved sounds (links, files, folders — named once, reused from any
+/// workspace), the bundled ambient presets, and external player availability.
 ///
 /// Deliberately no live audio preview here: wiring one safely would mean bypassing the
 /// resolver's own state tracking (`AppController.applyAudio`), risking the Now pane and
@@ -21,7 +21,6 @@ struct SoundLibraryPane: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 savedSoundsCard
-                playlistsCard
                 presetsCard
                 externalPlayersCard
             }
@@ -30,13 +29,15 @@ struct SoundLibraryPane: View {
         .navigationTitle("Sound Library")
     }
 
-    // MARK: Saved sounds (named external links, reusable across workspaces)
+    // MARK: Saved sounds — the library: links, files, and folders, all named and
+    // reusable from any workspace's sound picker. This replaced a separate "playlists"
+    // card that duplicated the concept and had no folder support.
 
     private var savedSoundsCard: some View {
-        Card(title: "Saved links") {
+        Card(title: "Your sounds") {
             VStack(alignment: .leading, spacing: 10) {
                 if config.savedSounds.isEmpty {
-                    Text("Paste an Apple Music or Spotify link once, name it, and reuse it in any workspace. Save from here, or with the Save button next to the link field in a workspace's Sound section.")
+                    Text("Save an Apple Music or Spotify link, a local file, or a whole folder once, name it, and pick it in any workspace. You can also save from the Sound section of a workspace.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 ForEach(config.savedSounds) { saved in
@@ -45,7 +46,11 @@ struct SoundLibraryPane: View {
                         onDelete: { deleteSavedSound(saved.id) }
                     )
                 }
-                Button("Add Link…") { showAddSaved = true }
+                HStack(spacing: 8) {
+                    Button("Add Link…") { showAddSaved = true }
+                    Button("Add File…") { addLocal(folder: false) }
+                    Button("Add Folder…") { addLocal(folder: true) }
+                }
             }
         }
         .sheet(isPresented: $showAddSaved) {
@@ -56,6 +61,21 @@ struct SoundLibraryPane: View {
                 controller.configStore.save(cfg)
             }
         }
+    }
+
+    private func addLocal(folder: Bool) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = !folder
+        panel.canChooseDirectories = folder
+        panel.allowsMultipleSelection = false
+        if !folder { panel.allowedContentTypes = [.audio] }
+        panel.prompt = "Add"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        var cfg = config
+        let name = folder ? url.lastPathComponent : url.deletingPathExtension().lastPathComponent
+        let source = (folder ? "internal:folder:" : "internal:file:") + url.path
+        cfg.savedSounds.append(SavedSound(name: name, source: source))
+        controller.configStore.save(cfg)
     }
 
     private func savedBinding(for id: String) -> Binding<SavedSound> {
@@ -74,54 +94,6 @@ struct SoundLibraryPane: View {
     private func deleteSavedSound(_ id: String) {
         var cfg = config
         cfg.savedSounds.removeAll { $0.id == id }
-        controller.configStore.save(cfg)
-    }
-
-    // MARK: Playlists
-
-    private var playlistsCard: some View {
-        Card(title: "Your playlists") {
-            VStack(alignment: .leading, spacing: 10) {
-                if config.localPlaylists.isEmpty {
-                    Text("No playlists yet. Create one and add specific files to it: the \"pick a few tracks\" option in a workspace's sound source.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                ForEach(config.localPlaylists) { playlist in
-                    PlaylistRow(
-                        playlist: binding(for: playlist.id),
-                        onDelete: { deletePlaylist(playlist.id) }
-                    )
-                }
-                Button("New Playlist") { addPlaylist() }
-            }
-        }
-    }
-
-    private func binding(for id: String) -> Binding<LocalPlaylist> {
-        Binding(
-            get: { config.localPlaylists.first { $0.id == id } ?? LocalPlaylist(id: id, name: id, paths: []) },
-            set: { newValue in
-                var cfg = controller.configStore.config
-                if let idx = cfg.localPlaylists.firstIndex(where: { $0.id == id }) {
-                    cfg.localPlaylists[idx] = newValue
-                    controller.configStore.save(cfg)
-                }
-            }
-        )
-    }
-
-    private func addPlaylist() {
-        var cfg = config
-        var id = "playlist"
-        var n = 1
-        while cfg.localPlaylists.contains(where: { $0.id == id }) { n += 1; id = "playlist-\(n)" }
-        cfg.localPlaylists.append(LocalPlaylist(id: id, name: "New Playlist", paths: []))
-        controller.configStore.save(cfg)
-    }
-
-    private func deletePlaylist(_ id: String) {
-        var cfg = config
-        cfg.localPlaylists.removeAll { $0.id == id }
         controller.configStore.save(cfg)
     }
 
@@ -181,18 +153,30 @@ private struct SavedSoundRow: View {
     private var providerLabel: String {
         if saved.source.hasPrefix("external:spotify") { return "Spotify" }
         if saved.source.hasPrefix("external:appleMusic") { return "Apple Music" }
+        if saved.source.hasPrefix("internal:file:") { return "File" }
+        if saved.source.hasPrefix("internal:folder:") { return "Folder" }
         return "Other"
     }
 
-    /// The link/name payload, for display: the last grammar segment.
+    private var iconName: String {
+        if saved.source.hasPrefix("internal:file:") { return "music.note" }
+        if saved.source.hasPrefix("internal:folder:") { return "folder" }
+        return "link"
+    }
+
+    /// The payload, for display: a path shows its tail, a link its last grammar segment.
     private var linkText: String {
+        if saved.source.hasPrefix("internal:file:") || saved.source.hasPrefix("internal:folder:") {
+            let path = saved.source.split(separator: ":", maxSplits: 2).map(String.init).last ?? ""
+            return (path as NSString).abbreviatingWithTildeInPath
+        }
         let parts = saved.source.split(separator: ":", maxSplits: 3).map(String.init)
         return parts.count == 4 ? parts[3] : saved.source
     }
 
     var body: some View {
         HStack {
-            Image(systemName: "link").font(.caption).foregroundStyle(.secondary).frame(width: 20)
+            Image(systemName: iconName).font(.caption).foregroundStyle(.secondary).frame(width: 20)
             TextField("Name", text: $saved.name).textFieldStyle(.plain).font(.callout.weight(.medium))
                 .frame(maxWidth: 180)
             Text(providerLabel)
@@ -244,55 +228,3 @@ private struct AddSavedSoundSheet: View {
     }
 }
 
-private struct PlaylistRow: View {
-    @Binding var playlist: LocalPlaylist
-    let onDelete: () -> Void
-    @State private var expanded = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                    .font(.caption2).foregroundStyle(.secondary)
-                    .onTapGesture { expanded.toggle() }
-                TextField("Name", text: $playlist.name).textFieldStyle(.plain).font(.callout.weight(.medium))
-                Spacer()
-                Text("\(playlist.paths.count) track\(playlist.paths.count == 1 ? "" : "s")")
-                    .font(.caption).foregroundStyle(.secondary)
-                Button { onDelete() } label: { Image(systemName: "trash") }
-                    .buttonStyle(.plain).foregroundStyle(.secondary)
-            }
-            if expanded {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(playlist.paths, id: \.self) { path in
-                        HStack {
-                            Text((path as NSString).lastPathComponent).font(.caption).lineLimit(1)
-                            Spacer()
-                            Button {
-                                playlist.paths.removeAll { $0 == path }
-                            } label: { Image(systemName: "xmark.circle.fill") }
-                                .buttonStyle(.plain).foregroundStyle(.secondary)
-                        }
-                    }
-                    Button("Add Files…") { addFiles() }.font(.caption)
-                }
-                .padding(.leading, 16)
-            }
-        }
-        .padding(10)
-        .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
-    }
-
-    private func addFiles() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = true
-        panel.allowedContentTypes = [.audio]
-        if panel.runModal() == .OK {
-            for url in panel.urls where !playlist.paths.contains(url.path) {
-                playlist.paths.append(url.path)
-            }
-        }
-    }
-}

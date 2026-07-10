@@ -43,8 +43,12 @@ struct SoundEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if !savedSounds.isEmpty {
+                librarySelector
+            }
+
             Picker("Source", selection: kindBinding) {
-                ForEach(Kind.allCases) { Text($0.label).tag($0) }
+                ForEach(availableKinds) { Text($0.label).tag($0) }
             }
             .labelsHidden()
 
@@ -71,6 +75,51 @@ struct SoundEditor: View {
                 perAppOverrides
             }
         }
+        .alert("Save to Sound Library", isPresented: $showSavePrompt) {
+            TextField("Name (e.g. Deep Focus Mix)", text: $savePromptName)
+            Button("Save") {
+                let fallback = suggestedSaveName()
+                let name = savePromptName.isEmpty ? fallback : savePromptName
+                onSaveSound?(name, sound.source ?? "")
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Saved sounds appear in the library picker above and in Sound Library, so you never set this up twice.")
+        }
+    }
+
+    private func suggestedSaveName() -> String {
+        guard let s = sound.source else { return "Untitled" }
+        if s.hasPrefix("internal:file:") || s.hasPrefix("internal:folder:") {
+            let path = s.split(separator: ":", maxSplits: 2).map(String.init).last ?? s
+            return URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+        }
+        return linkDraft.isEmpty ? s : linkDraft
+    }
+
+    // MARK: Library (saved sounds, any kind)
+
+    /// One picker across every saved sound — link, file, or folder. Picking one copies
+    /// its full source string; the kind row below follows automatically.
+    private var librarySelector: some View {
+        Picker("From your library", selection: Binding(
+            get: { savedSounds.first(where: { $0.source == sound.source })?.id ?? "custom" },
+            set: { id in
+                guard id != "custom", let saved = savedSounds.first(where: { $0.id == id }) else { return }
+                sound.source = saved.source
+                sound.action = .play
+                linkDraft = externalPlaylistText
+            }
+        )) {
+            Text("Choose below…").tag("custom")
+            ForEach(savedSounds) { Text($0.name).tag($0.id) }
+        }
+    }
+
+    /// The playlist kind only appears while old configs still reference it — the
+    /// standalone playlists UI was removed in favor of saved sounds.
+    private var availableKinds: [Kind] {
+        Kind.allCases.filter { $0 != .playlist || !allPlaylists.isEmpty || currentKind == .playlist }
     }
 
     // MARK: Kind
@@ -127,10 +176,17 @@ struct SoundEditor: View {
 
     private func pathPicker(isFolder: Bool) -> some View {
         HStack {
-            Text(sourceSuffix(after: isFolder ? "internal:folder:" : "internal:file:") ?? "No path chosen")
+            Text(sourceSuffix(after: isFolder ? "internal:folder:" : "internal:file:").map { ($0 as NSString).abbreviatingWithTildeInPath } ?? "No \(isFolder ? "folder" : "file") chosen yet")
                 .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
             Spacer()
             Button("Choose…") { choosePath(isFolder: isFolder) }
+            if onSaveSound != nil && sound.source != nil {
+                Button("Save…") {
+                    savePromptName = ""
+                    showSavePrompt = true
+                }
+                .help("Name this and keep it in your Sound Library for reuse in any workspace")
+            }
         }
     }
 
@@ -192,20 +248,6 @@ struct SoundEditor: View {
             }
             .labelsHidden()
 
-            if !externalSavedSounds.isEmpty {
-                Picker("Saved", selection: Binding(
-                    get: { savedSelectionID },
-                    set: { id in
-                        guard id != "custom", let saved = savedSounds.first(where: { $0.id == id }) else { return }
-                        sound.source = saved.source
-                        linkDraft = externalPlaylistText
-                    }
-                )) {
-                    Text("Custom / pasted link").tag("custom")
-                    ForEach(externalSavedSounds) { Text($0.name).tag($0.id) }
-                }
-            }
-
             HStack(spacing: 6) {
                 TextField("Playlist name, a spotify: URI, or a share link. Leave empty to just play/pause",
                           text: $linkDraft)
@@ -238,26 +280,6 @@ struct SoundEditor: View {
             // draft unless the user is mid-edit in the field.
             if !linkFieldFocused { linkDraft = externalPlaylistText }
         }
-        .alert("Save to Sound Library", isPresented: $showSavePrompt) {
-            TextField("Name (e.g. Deep Focus Mix)", text: $savePromptName)
-            Button("Save") {
-                let name = savePromptName.isEmpty ? linkDraft : savePromptName
-                onSaveSound?(name, sound.source ?? "")
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Saved sounds appear in the Saved picker here and in Sound Library, so you never paste the same link twice.")
-        }
-    }
-
-    /// Saved sounds usable in this picker (external sources only, any provider — picking
-    /// one switches the provider automatically since the full source string is copied).
-    private var externalSavedSounds: [SavedSound] {
-        savedSounds.filter { $0.source.hasPrefix("external:") }
-    }
-
-    private var savedSelectionID: String {
-        externalSavedSounds.first(where: { $0.source == sound.source })?.id ?? "custom"
     }
 
     private func commitLinkDraft() {
