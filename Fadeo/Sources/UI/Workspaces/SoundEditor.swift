@@ -24,6 +24,13 @@ struct SoundEditor: View {
     @State private var showSavePrompt = false
     @State private var savePromptName = ""
 
+    /// The kind the user picked before its source exists yet. Without this, choosing
+    /// "A file"/"A folder" self-destructed: the pick set `source = nil` (waiting for the
+    /// Choose… dialog), the picker's selection re-derived the kind from that nil source
+    /// as "Nothing", and the file row never appeared. Derived state needs this one bit
+    /// of memory for the not-yet-configured case.
+    @State private var pendingKind: Kind?
+
     private enum Kind: String, CaseIterable, Identifiable {
         case preset, file, folder, playlist, external, silence
         var id: String { rawValue }
@@ -52,7 +59,7 @@ struct SoundEditor: View {
             }
             .labelsHidden()
 
-            switch currentKind {
+            switch displayedKind {
             case .preset: presetPicker
             case .file: pathPicker(isFolder: false)
             case .folder: pathPicker(isFolder: true)
@@ -61,9 +68,9 @@ struct SoundEditor: View {
             case .silence: EmptyView()
             }
 
-            if currentKind != .silence {
+            if displayedKind != .silence {
                 volumeRow
-                if currentKind == .folder || currentKind == .playlist {
+                if displayedKind == .folder || displayedKind == .playlist {
                     orderRepeatRow
                 }
             }
@@ -106,6 +113,7 @@ struct SoundEditor: View {
             get: { savedSounds.first(where: { $0.source == sound.source })?.id ?? "custom" },
             set: { id in
                 guard id != "custom", let saved = savedSounds.first(where: { $0.id == id }) else { return }
+                pendingKind = nil
                 sound.source = saved.source
                 sound.action = .play
                 linkDraft = externalPlaylistText
@@ -119,11 +127,12 @@ struct SoundEditor: View {
     /// The playlist kind only appears while old configs still reference it — the
     /// standalone playlists UI was removed in favor of saved sounds.
     private var availableKinds: [Kind] {
-        Kind.allCases.filter { $0 != .playlist || !allPlaylists.isEmpty || currentKind == .playlist }
+        Kind.allCases.filter { $0 != .playlist || !allPlaylists.isEmpty || displayedKind == .playlist }
     }
 
     // MARK: Kind
 
+    /// What the source string says the kind is. `nil`/empty is "Nothing".
     private var currentKind: Kind {
         guard let s = sound.source, !s.isEmpty else { return .silence }
         if s.hasPrefix("internal:preset:") { return .preset }
@@ -134,16 +143,36 @@ struct SoundEditor: View {
         return .silence
     }
 
+    /// What the UI shows: the user's not-yet-configured pick wins over the derived kind.
+    private var displayedKind: Kind {
+        pendingKind ?? currentKind
+    }
+
     private var kindBinding: Binding<Kind> {
         Binding(
-            get: { currentKind },
+            get: { displayedKind },
             set: { newKind in
                 switch newKind {
-                case .preset: sound.source = "internal:preset:\(Self.presets[0])"
-                case .file, .folder: sound.source = nil   // wait for a Choose… pick
-                case .playlist: sound.source = allPlaylists.first.map { "internal:playlist:\($0.id)" }
-                case .external: sound.source = "external:appleMusic:command"
-                case .silence: sound.source = nil; sound.action = .pause
+                case .preset:
+                    pendingKind = nil
+                    sound.source = "internal:preset:\(Self.presets[0])"
+                case .file, .folder:
+                    // No source until a path is picked; remember the choice so the row
+                    // stays on File/Folder, and open the chooser right away — clicking
+                    // "A file" means "let me pick a file", not "show me a Choose button".
+                    pendingKind = newKind
+                    sound.source = nil
+                    DispatchQueue.main.async { choosePath(isFolder: newKind == .folder) }
+                case .playlist:
+                    pendingKind = nil
+                    sound.source = allPlaylists.first.map { "internal:playlist:\($0.id)" }
+                case .external:
+                    pendingKind = nil
+                    sound.source = "external:appleMusic:command"
+                case .silence:
+                    pendingKind = nil
+                    sound.source = nil
+                    sound.action = .pause
                 }
                 if newKind != .silence { sound.action = .play }
             }
@@ -200,7 +229,10 @@ struct SoundEditor: View {
         }
         if panel.runModal() == .OK, let url = panel.url {
             sound.source = (isFolder ? "internal:folder:" : "internal:file:") + url.path
+            pendingKind = nil   // the source now carries the kind
         }
+        // Cancelled: keep pendingKind, so the row stays on File/Folder with its
+        // "No file chosen yet" state and a Choose… button instead of snapping away.
     }
 
     // MARK: Playlist
