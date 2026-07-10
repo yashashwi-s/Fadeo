@@ -15,7 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         nc.addObserver(self, selector: #selector(windowsChanged),
                        name: NSWindow.willCloseNotification, object: nil)
 
-        // SwiftUI opens the `Window` scene at launch; close it so we start menu-bar-only —
+        // SwiftUI opens the `Window` scene at launch; close it so we start menu-bar-only,
         // unless this is the very first launch (onboarding needs the window) or the
         // screenshot-verification dev hook FADEO_OPEN_MAIN_ON_LAUNCH=1 is set.
         let keepOpen = !OnboardingSheet.hasCompleted

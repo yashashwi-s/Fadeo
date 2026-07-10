@@ -12,7 +12,7 @@ struct TriggersPane: View {
             VStack(alignment: .leading, spacing: 16) {
                 Card(title: "Sensors") {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("A sensor only runs when a workspace actually needs it — this keeps Fadeo at zero idle cost otherwise.")
+                        Text("A sensor only runs when a workspace actually needs it. This keeps Fadeo at zero idle cost otherwise.")
                             .font(.caption).foregroundStyle(.secondary)
                         ForEach(controller.sensorStatuses) { status in
                             HStack {

@@ -14,6 +14,10 @@ enum AppPaths {
         supportDirectory.appendingPathComponent("config.yaml")
     }
 
+    static var usageFile: URL {
+        supportDirectory.appendingPathComponent("usage.yaml")
+    }
+
     /// Create the support directory if needed.
     static func ensureSupportDirectory() throws {
         try FileManager.default.createDirectory(at: supportDirectory, withIntermediateDirectories: true)

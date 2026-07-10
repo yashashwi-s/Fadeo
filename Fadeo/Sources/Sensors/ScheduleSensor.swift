@@ -40,7 +40,7 @@ final class ScheduleSensor: Sensor {
         timer?.cancel()
         guard let interval = nextBoundaryInterval() else { timer = nil; return }
         let t = DispatchSource.makeTimerSource(queue: .main)
-        // One-shot to the next boundary, not a repeating tick — and a generous leeway
+        // One-shot to the next boundary, not a repeating tick, and a generous leeway
         // since this is a single infrequent wakeup, not a latency-sensitive one.
         t.schedule(deadline: .now() + interval, leeway: .seconds(5))
         t.setEventHandler { [weak self] in

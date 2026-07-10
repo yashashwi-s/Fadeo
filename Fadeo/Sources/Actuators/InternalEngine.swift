@@ -6,10 +6,10 @@ import FadeoCore
 /// `AVAudioEngine`, mutually exclusive at any moment (Fadeo plays one thing at a time):
 ///
 /// - **Ambient presets** (`internal:preset:*`) are *synthesized* in a real-time render
-///   block (brown/pink/white noise) — no shipped audio files, seamless, tiny footprint.
+///   block (brown/pink/white noise). No shipped audio files, seamless, tiny footprint.
 /// - **Your own audio** (`internal:file:<path>`, `internal:folder:<path>`,
 ///   `internal:playlist:<id>`) is played via `AVAudioPlayerNode`, queued and ordered per
-///   the workspace's `order`/`repeatMode` — this is the "bring your own sound" pillar.
+///   the workspace's `order`/`repeatMode`. This is the "bring your own sound" pillar.
 ///
 /// Fades are sample-accurate for the noise path and a short bounded timer-driven ramp for
 /// the file path (AVAudioMixerNode has no ramping API of its own). The engine is fully
@@ -115,7 +115,7 @@ final class InternalEngine {
     private func crossfade(to source: String, volume: Double, ms: Int) {
         pendingWork?.cancel()
         // Invalidate any in-flight natural track-advance now, not when the delayed swap
-        // fires — otherwise a track finishing during the fade-out window snaps the volume
+        // fires. Otherwise a track finishing during the fade-out window snaps the volume
         // back to full, fighting the fade. See git history for how this was caught.
         playbackGeneration += 1
         let half = max(1, ms / 2)
@@ -199,7 +199,7 @@ final class InternalEngine {
 
     private func handleTrackFinished(generation: Int) {
         // A stop/crossfade already invalidated this schedule (bumped playbackGeneration
-        // the instant it was requested, not when it completes) — do nothing, so a track
+        // the instant it was requested, not when it completes). Do nothing, so a track
         // finishing mid-fade-out never snaps the volume back up.
         guard generation == playbackGeneration, activeKind == .files else { return }
         switch repeatMode {
@@ -218,7 +218,7 @@ final class InternalEngine {
         playCurrentQueueItem(fadeInMs: 0)
     }
 
-    // MARK: Volume ramp (file path — AVAudioMixerNode has no built-in ramping)
+    // MARK: Volume ramp (file path: AVAudioMixerNode has no built-in ramping)
 
     private func rampFileVolume(to target: Float, ms: Int) {
         fadeTimer?.cancel(); fadeTimer = nil

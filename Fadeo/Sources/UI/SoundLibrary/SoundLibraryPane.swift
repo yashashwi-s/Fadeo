@@ -2,13 +2,13 @@ import SwiftUI
 import AppKit
 import FadeoCore
 
-/// Manage local playlists (the "curated subset of files" case — PLAN.md §4), see the
+/// Manage local playlists (the "curated subset of files" case, PLAN.md §4), see the
 /// bundled ambient presets, and check which external players are available to conduct.
 ///
 /// Deliberately no live audio preview here: wiring one safely would mean bypassing the
 /// resolver's own state tracking (`AppController.applyAudio`), risking the Now pane and
 /// the menu bar showing a workspace that isn't actually what's playing. Rather than ship
-/// that half-finished, it's cut — a real preview needs a dedicated suppress-evaluation
+/// that half-finished, it's cut. A real preview needs a dedicated suppress-evaluation
 /// mode in the controller, which is a clean follow-up, not a quick add-on.
 struct SoundLibraryPane: View {
     @EnvironmentObject var controller: AppController
@@ -34,7 +34,7 @@ struct SoundLibraryPane: View {
         Card(title: "Your playlists") {
             VStack(alignment: .leading, spacing: 10) {
                 if config.localPlaylists.isEmpty {
-                    Text("No playlists yet. Create one and add specific files to it — the \"pick a few tracks\" option in a workspace's sound source.")
+                    Text("No playlists yet. Create one and add specific files to it: the \"pick a few tracks\" option in a workspace's sound source.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 ForEach(config.localPlaylists) { playlist in
@@ -81,11 +81,11 @@ struct SoundLibraryPane: View {
     private var presetsCard: some View {
         Card(title: "Bundled ambient presets") {
             VStack(alignment: .leading, spacing: 8) {
-                presetRow("Brown noise", "Deep, warm — the default for focus work.")
+                presetRow("Brown noise", "Deep and warm, the default for focus work.")
                 presetRow("Pink noise", "Softer high end than white noise.")
-                presetRow("White noise", "Flat across all frequencies — the most masking.")
+                presetRow("White noise", "Flat across all frequencies, the most masking.")
                 presetRow("Rain", "A pink-noise texture tuned to read as rainfall.")
-                Text("Synthesized in real time — no audio files shipped, no looping seams.")
+                Text("Synthesized in real time. No audio files shipped, no looping seams.")
                     .font(.caption2).foregroundStyle(.tertiary)
             }
         }

@@ -3,7 +3,7 @@ import AppKit
 import FadeoCore
 
 /// Builds/edits a `Sound.source` string by parsing it into a UI-friendly shape and
-/// reconstructing it on every edit — the model stays a single opaque string (simple,
+/// reconstructing it on every edit. The model stays a single opaque string (simple,
 /// serializes cleanly, matches the source grammar in PLAN.md §4) while the UI gets normal
 /// pickers and text fields via computed bindings.
 struct SoundEditor: View {
@@ -140,7 +140,7 @@ struct SoundEditor: View {
     private var playlistPicker: some View {
         Group {
             if allPlaylists.isEmpty {
-                Text("No playlists yet — create one in Sound Library.")
+                Text("No playlists yet. Create one in Sound Library.")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
                 Picker("Playlist", selection: Binding(
@@ -179,13 +179,19 @@ struct SoundEditor: View {
                 Text("Spotify").tag("spotify")
             }
             .labelsHidden()
-            TextField("Playlist name, a spotify: URI, or paste a share link — leave empty to just play/pause",
+            TextField("Playlist name, a spotify: URI, or a share link. Leave empty to just play/pause",
                      text: Binding(
                         get: { externalPlaylistText },
                         set: { rebuildExternal(provider: externalProvider, playlist: $0) }
                      ))
                 .textFieldStyle(.roundedBorder)
+            Text(shareLinkExplanation)
+                .font(.caption2).foregroundStyle(.tertiary)
         }
+    }
+
+    private var shareLinkExplanation: String {
+        "A pasted share link opens directly in the \(externalProvider == "spotify" ? "Spotify" : "Music") app on this Mac, not a browser. If that app isn't installed, it opens in your browser instead."
     }
 
     private func rebuildExternal(provider: String, playlist: String) {

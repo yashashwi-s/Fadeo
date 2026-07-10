@@ -8,6 +8,7 @@ import SwiftUI
 struct OnboardingSheet: View {
     @Binding var isPresented: Bool
     @State private var launchAtLogin = LoginItem.isEnabled
+    @State private var diagnosticsOptIn = DiagnosticsPreference.isEnabled
 
     var body: some View {
         VStack(spacing: 0) {
@@ -15,7 +16,7 @@ struct OnboardingSheet: View {
                 Image("AppLogo").resizable().scaledToFit().frame(width: 64, height: 64)
                     .clipShape(RoundedRectangle(cornerRadius: 14))
                 Text("Welcome to Fadeo").font(.title2.weight(.semibold))
-                Text("Fadeo watches what you're doing and plays, switches, or fades sound to match — silently, in the background.")
+                Text("Fadeo watches what you're doing and plays, switches, or fades sound to match, silently, in the background.")
                     .font(.callout).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center).frame(maxWidth: 380)
             }
@@ -24,11 +25,11 @@ struct OnboardingSheet: View {
             VStack(alignment: .leading, spacing: 14) {
                 permissionRow(
                     icon: "music.note.list", title: "Controlling Spotify or Apple Music",
-                    detail: "macOS will ask you to approve this the first time a workspace needs it (Automation). Fadeo only sends play/pause/volume — nothing is read or uploaded."
+                    detail: "macOS will ask you to approve this the first time a workspace needs it (Automation). Fadeo only sends play, pause, and volume commands. Nothing is read or uploaded."
                 )
                 permissionRow(
                     icon: "video", title: "Camera & microphone",
-                    detail: "Fadeo only checks whether they're in use, to detect meetings — it never opens or records from either. No permission prompt happens for this."
+                    detail: "Fadeo only checks whether they're in use, to detect meetings. It never opens or records from either, so no permission prompt happens for this."
                 )
                 permissionRow(
                     icon: "moon", title: "Focus mode",
@@ -43,6 +44,14 @@ struct OnboardingSheet: View {
                 .onChange(of: launchAtLogin) { _, v in LoginItem.setEnabled(v) }
                 .padding(.horizontal, 32)
 
+            VStack(alignment: .leading, spacing: 6) {
+                Toggle("Help improve Fadeo with anonymous usage data", isOn: $diagnosticsOptIn)
+                    .onChange(of: diagnosticsOptIn) { _, v in DiagnosticsPreference.isEnabled = v }
+                Text(privacyExplanation)
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 32).padding(.top, 12)
+
             Spacer(minLength: 20)
 
             Button("Get Started") {
@@ -54,6 +63,10 @@ struct OnboardingSheet: View {
             .padding(.bottom, 28)
         }
         .frame(width: 460)
+    }
+
+    private var privacyExplanation: String {
+        "Fadeo always tracks your own usage locally so you can see it (Usage tab). If you turn this on, a coarse summary can be shared: session count, days used, number of workspaces, total switches, and total active time. Never workspace or app names, file paths, or anything else on your Mac. Change this anytime in Preferences."
     }
 
     private func permissionRow(icon: String, title: String, detail: String) -> some View {

@@ -4,25 +4,25 @@ import FadeoCore
 
 /// Conducts a player you already use, rather than playing audio itself. Three layers:
 /// - Generic transport (works for whichever app currently holds Now Playing, without
-///   needing to know which one) via `MediaRemoteBridge` — no Automation permission needed.
+///   needing to know which one) via `MediaRemoteBridge`. No Automation permission needed.
 /// - A pasted share link (`https://music.apple.com/...`, `https://open.spotify.com/...`)
-///   is handed to the target app via `NSWorkspace.open`, not AppleScript — there is no
+///   is handed to the target app via `NSWorkspace.open`, not AppleScript. There is no
 ///   AppleScript verb to "play this catalog URL" for either app, but both handle their
 ///   own share links directly (this is what happens when you click one anywhere else).
 ///   Verified against ground truth: `play playlist "<url>"` fails (-1700, a URL isn't a
 ///   playlist name); `open -a Music "<url>"` correctly starts playback.
 /// - A local playlist **name** (Apple Music) or **URI** (`spotify:track:...`,
-///   Spotify — its AppleScript dictionary does accept URIs directly) — via AppleScript.
+///   Spotify's AppleScript dictionary accepts URIs directly), via AppleScript.
 ///   Requires Automation access on first use; declining just means that targeting
 ///   silently no-ops, transport control still works.
 ///
 /// Source grammar (see PLAN.md §4):
-///   external:command                       — play/pause whatever's currently cued, any app
-///   external:appleMusic:command            — same, explicitly through Music.app
-///   external:appleMusic:playlist:<name>    — switch Music.app to that local playlist
-///   external:appleMusic:playlist:<url>     — open a music.apple.com share link
-///   external:spotify:command               — same, explicitly through Spotify
-///   external:spotify:playlist:<uri-or-url> — a spotify: URI (AppleScript) or open.spotify.com link
+///   external:command                       play/pause whatever's currently cued, any app
+///   external:appleMusic:command            same, explicitly through Music.app
+///   external:appleMusic:playlist:<name>    switch Music.app to that local playlist
+///   external:appleMusic:playlist:<url>     open a music.apple.com share link
+///   external:spotify:command               same, explicitly through Spotify
+///   external:spotify:playlist:<uri-or-url> a spotify: URI (AppleScript) or open.spotify.com link
 final class ExternalConductor {
     private enum Target {
         case generic
@@ -119,7 +119,7 @@ final class ExternalConductor {
         s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
     }
 
-    /// A pasted `https://` share link — as opposed to a local playlist name or a
+    /// A pasted `https://` share link, as opposed to a local playlist name or a
     /// `spotify:` URI, both of which AppleScript handles directly.
     private func shareLinkURL(_ s: String) -> URL? {
         guard s.hasPrefix("http://") || s.hasPrefix("https://"), let url = URL(string: s) else { return nil }
@@ -130,15 +130,15 @@ final class ExternalConductor {
     /// resolution, which needs the extra nudge of a concrete target (see file header).
     private func openShareLink(_ url: URL, bundleID: String) {
         guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
-            NSWorkspace.shared.open(url)   // app not found by id — best effort via default handler
+            NSWorkspace.shared.open(url)   // app not found by id, best effort via default handler
             return
         }
         NSWorkspace.shared.open([url], withApplicationAt: appURL, configuration: NSWorkspace.OpenConfiguration())
     }
 
     /// A share link loads/cues the right track but does NOT auto-start playback (verified
-    /// against ground truth: player state stays "paused" until an explicit play follows) —
-    /// the app needs a moment to finish handling the handoff first, or an immediate `play`
+    /// against ground truth: player state stays "paused" until an explicit play follows).
+    /// The app needs a moment to finish handling the handoff first, or an immediate `play`
     /// lands before there's anything to play.
     private func playAfterHandoff(_ script: String) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {

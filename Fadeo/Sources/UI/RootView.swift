@@ -9,6 +9,7 @@ enum Pane: String, CaseIterable, Identifiable {
     case soundLibrary = "Sound Library"
     case precedence = "Precedence"
     case triggers = "Triggers"
+    case usage = "Usage"
     case preferences = "Preferences"
     case advanced = "Advanced"
     case about = "About"
@@ -22,6 +23,7 @@ enum Pane: String, CaseIterable, Identifiable {
         case .soundLibrary: return "music.note.list"
         case .precedence: return "arrow.triangle.branch"
         case .triggers: return "sensor.tag.radiowaves.forward"
+        case .usage: return "chart.bar"
         case .preferences: return "gearshape"
         case .advanced: return "curlybraces"
         case .about: return "info.circle"
@@ -35,6 +37,7 @@ enum Pane: String, CaseIterable, Identifiable {
         case .soundLibrary: return "M2 · M4"
         case .precedence: return "M2"
         case .triggers: return "M3"
+        case .usage: return "M5"
         case .advanced: return "M4"
         }
     }
@@ -71,6 +74,7 @@ struct RootView: View {
                 case .soundLibrary: SoundLibraryPane()
                 case .precedence: PrecedencePane()
                 case .triggers: TriggersPane()
+                case .usage: UsagePane(usageStore: controller.usageStore)
                 case .advanced: AdvancedPane()
                 case .preferences: PreferencesPane()
                 case .about: AboutPane()

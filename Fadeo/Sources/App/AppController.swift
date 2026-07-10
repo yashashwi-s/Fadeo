@@ -1,11 +1,11 @@
 import Foundation
+import AppKit
 import Combine
 import FadeoCore
 
-/// The M0 brain: sensors → Context → (debounced) resolve → Decision + trace.
-/// Audio actuators land in M1; here we prove the whole event-driven pipeline and expose
-/// live state for the dashboard and menu bar. No polling anywhere — every update is
-/// driven by an OS push through a sensor.
+/// The app's brain: sensors feed Context, which resolves to a Decision, which drives the
+/// InternalEngine/ExternalConductor actuators. Exposes live state for the dashboard and
+/// menu bar. No polling anywhere: every update is driven by an OS push through a sensor.
 @MainActor
 final class AppController: ObservableObject {
     // Live state (published to the UI)
@@ -33,20 +33,23 @@ final class AppController: ObservableObject {
     }
 
     let configStore: ConfigStore
+    let usageStore = UsageStore()
     private let resolver = Resolver()
     private var resolverState = ResolverState()
+    private var usageTrackedWorkspaceID: String?
+    private var usageTrackedSince = Date()
 
     // Audio actuation
     private let engine = InternalEngine()
     private let external = ExternalConductor()
     private let reconciler = Reconciler()
     private var audioState: AudioState = .silent
-    /// Which actuator currently owns playback — needed because `.stop`/`.setVolume`
+    /// Which actuator currently owns playback, needed because `.stop`/`.setVolume`
     /// commands don't carry a source string, so we route by "whoever's playing".
     private enum Actuator: Equatable { case none, internalEngine, external }
     private var activeActuator: Actuator = .none
 
-    // Sensors — lazily activated: a sensor whose fields no enabled workspace references
+    // Sensors, lazily activated: a sensor whose fields no enabled workspace references
     // is never started (zero observers, zero cost). See requiredFields()/reconcileSensors().
     private let appFocus = AppFocusSensor()
     private let spaceSensor = SpaceSensor()
@@ -70,11 +73,11 @@ final class AppController: ObservableObject {
 
         // Re-evaluate whenever the config hot-reloads.
         // @Published fires its publisher from willSet, before the backing storage is
-        // actually updated — reading `configStore.config` synchronously inside this sink
+        // actually updated. Reading `configStore.config` synchronously inside this sink
         // would still see the OLD value (a well-known Combine footgun). Dispatching to the
         // next run loop turn (still same-frame, imperceptible) ensures reconcileSensors()/
-        // evaluate() — which both read configStore.config directly rather than a passed
-        // parameter, for API simplicity — see the config that's actually now in effect.
+        // evaluate() (which both read configStore.config directly rather than a passed
+        // parameter, for API simplicity) see the config that's actually now in effect.
         configStore.$config
             .dropFirst()
             .sink { [weak self] cfg in
@@ -90,6 +93,16 @@ final class AppController: ObservableObject {
 
         reconcileSensors()
         evaluate()
+
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.recordUsageIfWorkspaceChanged(newWorkspaceID: nil)
+                self.usageStore.flush()
+            }
+        }
     }
 
     var activeWorkspaceName: String? {
@@ -193,7 +206,24 @@ final class AppController: ObservableObject {
         } else if d.target.action == .stop || d.target.action == .resumePrevious {
             resolverState.activeWorkspace = nil
         }
+        recordUsageIfWorkspaceChanged(newWorkspaceID: d.activeWorkspace)
         applyAudio(d)
+    }
+
+    // MARK: Usage tracking (genuine switches only, no polling)
+
+    private func recordUsageIfWorkspaceChanged(newWorkspaceID: String?) {
+        guard newWorkspaceID != usageTrackedWorkspaceID else { return }
+        let now = Date()
+        usageStore.recordElapsed(
+            workspaceID: usageTrackedWorkspaceID,
+            seconds: now.timeIntervalSince(usageTrackedSince)
+        )
+        if let newWorkspaceID {
+            usageStore.recordActivation(workspaceID: newWorkspaceID)
+        }
+        usageTrackedWorkspaceID = newWorkspaceID
+        usageTrackedSince = now
     }
 
     // MARK: Audio
@@ -217,7 +247,7 @@ final class AppController: ObservableObject {
 
         // If this command is about to hand playback to a DIFFERENT actuator than the one
         // currently playing, explicitly stop the one being left behind first. The
-        // Reconciler only diffs source strings — it has no notion of actuator identity —
+        // Reconciler only diffs source strings, it has no notion of actuator identity,
         // so without this, switching e.g. an internal preset to an external Spotify/Music
         // source would leave the internal engine running invisibly forever (confirmed as
         // a real bug: reported as "white noise still playing" after switching a

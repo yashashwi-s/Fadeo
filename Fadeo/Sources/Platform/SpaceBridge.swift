@@ -34,7 +34,7 @@ enum SpaceBridge {
             return nil
         }
         // "Display Identifier" is a per-display UUID, not a stable "Main" marker (verified
-        // by inspection — there is no literal "Main" value to match). CGS orders the main
+        // by inspection: there is no literal "Main" value to match. CGS orders the main
         // display first in practice, and this is single-display-correct regardless; true
         // per-display resolution is out of scope for v1 (see PLAN.md §19).
         guard let display = displays.first,

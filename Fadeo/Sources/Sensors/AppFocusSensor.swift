@@ -13,7 +13,7 @@ final class AppFocusSensor: Sensor {
     func start(emit: @escaping (ContextPatch) -> Void) {
         // Seed with the current frontmost app immediately.
         let current = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        emit(ContextPatch(apply: { $0.frontmostApp = current }, label: "app → \(current ?? "—")"))
+        emit(ContextPatch(apply: { $0.frontmostApp = current }, label: "app → \(current ?? "none")"))
 
         observer = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
@@ -22,7 +22,7 @@ final class AppFocusSensor: Sensor {
             let app = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)
             let bundle = app?.bundleIdentifier
             MainActor.assumeIsolated {
-                emit(ContextPatch(apply: { $0.frontmostApp = bundle }, label: "app → \(bundle ?? "—")"))
+                emit(ContextPatch(apply: { $0.frontmostApp = bundle }, label: "app → \(bundle ?? "none")"))
             }
         }
     }

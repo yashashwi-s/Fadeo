@@ -23,6 +23,18 @@ public enum ConfigCodec {
     public static func decode(string: String) throws -> Config {
         try YAMLDecoder().decode(Config.self, from: string)
     }
+
+    /// Generic YAML encode/decode for other on-disk models (e.g. UsageStats) that want
+    /// the same format without each needing its own codec type.
+    public static func encodeAny<T: Encodable>(_ value: T) throws -> Data {
+        let encoder = YAMLEncoder()
+        encoder.options.sortKeys = true
+        return Data(try encoder.encode(value).utf8)
+    }
+
+    public static func decodeAny<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+        try YAMLDecoder().decode(T.self, from: String(decoding: data, as: UTF8.self))
+    }
 }
 
 // MARK: - Starter config

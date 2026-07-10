@@ -41,7 +41,7 @@ struct WorkspaceEditor: View {
                         Text("\(workspace.priority)").monospacedDigit()
                     }
                 }
-                Text("Used to break ties when multiple workspaces match at once — see Precedence.")
+                Text("Used to break ties when multiple workspaces match at once. See Precedence.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -50,7 +50,7 @@ struct WorkspaceEditor: View {
     // MARK: Match
 
     private var matchCard: some View {
-        Card(title: "Match — when this workspace activates") {
+        Card(title: "Match: when this workspace activates") {
             VStack(alignment: .leading, spacing: 14) {
                 appsSection
                 Divider()
@@ -87,21 +87,15 @@ struct WorkspaceEditor: View {
                 }
             }
             HStack {
-                Menu("Add App") {
-                    ForEach(installedApps) { app in
-                        Button {
-                            addApp(app.bundleID)
-                        } label: {
-                            Label { Text(app.name) } icon: { Image(nsImage: app.icon) }
-                        }
-                    }
+                AppPickerButton(label: "Add App", apps: installedApps) { app in
+                    if let app { addApp(app.bundleID) }
                 }
                 Button("Capture Frontmost") {
                     if let app = InstalledApps.frontmost() { addApp(app.bundleID) }
                 }
             }
             .font(.caption)
-            Text("Weak apps never pull you into this workspace — they only keep it playing if it's already active.")
+            Text("Weak apps never pull you into this workspace. They only keep it playing if it's already active.")
                 .font(.caption2).foregroundStyle(.tertiary)
         }
     }
@@ -238,7 +232,7 @@ struct WorkspaceEditor: View {
 
     private func appIcon(_ bundle: String) -> NSImage {
         if let app = installedApps.first(where: { $0.bundleID == bundle }) { return app.icon }
-        // Not in the scanned list (e.g. a hand-typed or since-removed bundle id) — ask
+        // Not in the scanned list (e.g. a hand-typed or since-removed bundle id). Ask
         // LaunchServices directly rather than showing nothing.
         if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundle) {
             return NSWorkspace.shared.icon(forFile: url.path)

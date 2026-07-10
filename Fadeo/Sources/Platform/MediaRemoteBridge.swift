@@ -27,11 +27,11 @@ final class MediaRemoteBridge {
         guard let handle = dlopen(
             "/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_LAZY
         ) else {
-            NSLog("Fadeo: MediaRemote.framework unavailable — external transport control disabled")
+            NSLog("Fadeo: MediaRemote.framework unavailable, external transport control disabled")
             return
         }
         guard let sym = dlsym(handle, "MRMediaRemoteSendCommand") else {
-            NSLog("Fadeo: MRMediaRemoteSendCommand symbol not found — external transport control disabled")
+            NSLog("Fadeo: MRMediaRemoteSendCommand symbol not found, external transport control disabled")
             return
         }
         sendCommand = unsafeBitCast(sym, to: SendCommandFn.self)

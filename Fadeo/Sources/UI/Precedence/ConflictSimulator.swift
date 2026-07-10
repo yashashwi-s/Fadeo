@@ -14,6 +14,10 @@ struct ConflictSimulator: View {
     @State private var hour: Double = 12
     @State private var installedApps: [InstalledApp] = []
 
+    private var selectedAppName: String {
+        installedApps.first { $0.bundleID == appBundle }?.name ?? "None"
+    }
+
     private var result: Decision {
         var ctx = Context()
         ctx.frontmostApp = appBundle.isEmpty ? nil : appBundle
@@ -36,13 +40,11 @@ struct ConflictSimulator: View {
                 Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
                     GridRow {
                         Text("App").foregroundStyle(.secondary)
-                        Picker("", selection: $appBundle) {
-                            Text("None").tag("")
-                            ForEach(installedApps) { app in
-                                Label { Text(app.name) } icon: { Image(nsImage: app.icon) }
-                                    .tag(app.bundleID)
-                            }
-                        }.labelsHidden()
+                        AppPickerButton(
+                            label: selectedAppName, apps: installedApps, noneOption: "None"
+                        ) { app in
+                            appBundle = app?.bundleID ?? ""
+                        }
                     }
                     GridRow {
                         Text("Space").foregroundStyle(.secondary)

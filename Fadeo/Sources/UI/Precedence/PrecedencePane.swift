@@ -3,6 +3,7 @@ import FadeoCore
 
 struct PrecedencePane: View {
     @EnvironmentObject var controller: AppController
+    @State private var showResetConfirm = false
 
     private var config: Config { controller.configStore.config }
     private var settingsBinding: Binding<FadeoCore.Settings> {
@@ -27,12 +28,28 @@ struct PrecedencePane: View {
             .padding(20)
         }
         .navigationTitle("Precedence")
+        .toolbar {
+            Button("Reset to Defaults") { showResetConfirm = true }
+        }
+        .confirmationDialog(
+            "Reset precedence settings to defaults?",
+            isPresented: $showResetConfirm, titleVisibility: .visible
+        ) {
+            Button("Reset", role: .destructive) {
+                var cfg = config
+                cfg.settings = FadeoCore.Settings()
+                controller.configStore.save(cfg)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This resets the tiebreak order, fallback, meeting trigger, and global timing defaults. Your workspaces are not affected.")
+        }
     }
 
     // MARK: Tiebreak chain
 
     private var tiebreakCard: some View {
-        Card(title: "Tiebreak order — when multiple workspaces match at once") {
+        Card(title: "Tiebreak order: when multiple workspaces match at once") {
             VStack(alignment: .leading, spacing: 4) {
                 List {
                     ForEach(settingsBinding.tiebreak) { $strategy in
@@ -58,18 +75,18 @@ struct PrecedencePane: View {
 
     private func label(_ s: TiebreakStrategy) -> String {
         switch s {
-        case .stickiness: return "Stickiness — keep the current workspace if it still matches"
-        case .specificity: return "Specificity — the more constrained match wins"
-        case .priority: return "Priority — your explicit rank"
-        case .recency: return "Recency — whichever was active most recently"
-        case .stableId: return "Stable order (always decides — not reorderable)"
+        case .stickiness: return "Stickiness: keep the current workspace if it still matches"
+        case .specificity: return "Specificity: the more constrained match wins"
+        case .priority: return "Priority: your explicit rank"
+        case .recency: return "Recency: whichever was active most recently"
+        case .stableId: return "Stable order (always decides, not reorderable)"
         }
     }
 
     // MARK: Fallback
 
     private var fallbackCard: some View {
-        Card(title: "Fallback — when nothing matches") {
+        Card(title: "Fallback: when nothing matches") {
             Picker("", selection: settingsBinding.fallback) {
                 Text("Keep current audio").tag(Fallback.keepCurrent)
                 Text("Resume previous").tag(Fallback.resumePrevious)

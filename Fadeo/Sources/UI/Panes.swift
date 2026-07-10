@@ -101,7 +101,7 @@ struct NowPane: View {
             row("Events observed", "\(controller.eventCount)")
             row("Active sensors", "\(activeSensorCount) of \(controller.sensorStatuses.count)")
             row("Memory (RSS)", memoryLabel)
-            row("Steady-state polling", "none — all OS push")
+            row("Steady-state polling", "none, all OS push")
         }
     }
 
@@ -151,6 +151,7 @@ struct NowPane: View {
 struct PreferencesPane: View {
     @EnvironmentObject var controller: AppController
     @State private var launchAtLogin = LoginItem.isEnabled
+    @State private var diagnosticsOptIn = DiagnosticsPreference.isEnabled
 
     var body: some View {
         ScrollView {
@@ -160,13 +161,19 @@ struct PreferencesPane: View {
                         .onChange(of: launchAtLogin) { _, v in LoginItem.setEnabled(v) }
                     Toggle("Pause automation", isOn: $controller.automationPaused)
                 }
+                Card(title: "Privacy") {
+                    Toggle("Share anonymous usage data", isOn: $diagnosticsOptIn)
+                        .onChange(of: diagnosticsOptIn) { _, v in DiagnosticsPreference.isEnabled = v }
+                    Text("A coarse summary only: session count, days used, workspace count, switches, and total active time. Never workspace names, app names, or file paths. Local usage tracking (Usage tab) always runs regardless of this setting.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
                 Card(title: "Configuration") {
                     HStack {
-                        Text("config.json").font(.system(.callout, design: .monospaced))
+                        Text("config.yaml").font(.system(.callout, design: .monospaced))
                         Spacer()
                         Button("Reveal in Finder") { controller.configStore.revealInFinder() }
                     }
-                    Text("Edit this file directly — Fadeo hot-reloads it. Or use the Workspaces editor (M4).")
+                    Text("Edit this file directly. Fadeo hot-reloads it. Or use the Workspaces editor.")
                         .font(.caption).foregroundStyle(.secondary)
                     if let err = controller.configStore.lastError {
                         Label(err, systemImage: "exclamationmark.triangle.fill")
