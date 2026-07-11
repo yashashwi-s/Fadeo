@@ -474,7 +474,10 @@ forever.** Payment funds development and clears the nag; it never unlocks functi
      pay still help the product, and the developer gets real usage insight.
 - **Free-license giveaway (launch gimmick):** for a limited window, `puremac.yashashwi.me/fadeo`
   shows a **"Generate free lifetime license"** button, **capped at the first ~100**. Those
-  keys are ordinary offline licenses — permanent, no nag.
+  keys are ordinary offline licenses — permanent, no nag — once activated. Optionally
+  emailed too (a plain convenience, not required to claim). **Unactivated free keys expire
+  after 7 days** (`LicensePayload.mustActivateBy`, checked once at first activation only —
+  see `LicenseManager.activate`); paid keys never carry this field and never expire.
 - **Offline validation.** License = an **Ed25519-signed blob**; the app bundles the public
   key and verifies locally. **No phone-home at runtime** (privacy + zero background network
   cost). Online only at the moment of purchase / free-key generation / manual refresh.
