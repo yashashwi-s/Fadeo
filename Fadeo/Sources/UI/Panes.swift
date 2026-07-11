@@ -89,10 +89,25 @@ struct NowPane: View {
     private var liveContext: some View {
         Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 8) {
             row("Frontmost app", controller.context.frontmostApp ?? "none")
-            row("Desktop / Space", controller.context.activeSpace?.index.map { "Desktop \($0)" } ?? "not yet (M3)")
-            row("In a meeting", controller.context.cameraActive || controller.context.micActive ? "Yes" : "not yet (M3)")
-            row("Focus mode", controller.context.focusMode ?? "not yet (M3)")
+            row("Desktop / Space", spaceLabel)
+            row("In a meeting", meetingLabel)
+            row("Focus mode", focusLabel)
         }
+    }
+
+    // A sensor that no enabled workspace references is off by design (lazy activation),
+    // so say "not watched" rather than implying the feature is missing.
+    private var spaceLabel: String {
+        guard controller.spaceTracked else { return "not watched (no Space rule)" }
+        return controller.context.activeSpace?.index.map { "Desktop \($0)" } ?? "detecting…"
+    }
+    private var meetingLabel: String {
+        guard controller.meetingTracked else { return "not watched (no meeting rule)" }
+        return (controller.context.cameraActive || controller.context.micActive) ? "Yes" : "No"
+    }
+    private var focusLabel: String {
+        guard controller.focusTracked else { return "not watched (no Focus rule)" }
+        return controller.context.focusMode ?? "None"
     }
 
     private var energy: some View {

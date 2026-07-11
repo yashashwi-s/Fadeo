@@ -132,6 +132,12 @@ final class AppController: ObservableObject {
         let fields: [String]
     }
 
+    /// Which context sensors are currently active (for honest Now-pane labels — an
+    /// unreferenced sensor is off by lazy activation, not unimplemented).
+    var spaceTracked: Bool { runningSensors.contains(ObjectIdentifier(spaceSensor)) }
+    var meetingTracked: Bool { runningSensors.contains(ObjectIdentifier(meetingSensor)) }
+    var focusTracked: Bool { runningSensors.contains(ObjectIdentifier(focusSensor)) }
+
     var sensorStatuses: [SensorStatus] {
         let names: [(String, String)] = [
             ("AppFocusSensor", "App Focus"), ("SpaceSensor", "Desktop / Space"),
