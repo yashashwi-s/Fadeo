@@ -97,15 +97,42 @@ final class ExternalConductor {
             let target = parse(state.source ?? "")
             work.async { [weak self] in self?.performSetVolume(volume, target: target) }
         case .stop:
+            // Capture which app we were conducting BEFORE clearing state.
+            let target = parse(state.source ?? "")
             state = .silent
-            work.async { [weak self] in
-                guard let self else { return }
-                // Pause via the app itself when we know which one we were conducting —
-                // MediaRemote pauses whatever holds Now Playing, which may be some other
-                // app the user started manually since.
-                self.mediaRemote.pause()
-            }
+            work.async { [weak self] in self?.performStop(target: target) }
         }
+    }
+
+    // MARK: Stop (background queue)
+
+    /// Pause the SPECIFIC app we were conducting, not whatever generically holds Now
+    /// Playing. The start path is app-specific (`tell Music to play`), so the stop must
+    /// be too — the generic `MRMediaRemoteSendCommand(pause)` targets an ambiguous
+    /// now-playing session that may not be Music/Spotify at all (and was verified
+    /// unreliable in practice: Apple Music kept playing through a meeting override).
+    /// Only script an app that's actually running, so pausing never *launches* it.
+    private func performStop(target: Target) {
+        switch target {
+        case .appleMusic:
+            if isRunning("com.apple.Music") {
+                AppleScriptRunner.run(#"tell application "Music" to pause"#)
+            } else {
+                mediaRemote.pause()
+            }
+        case .spotify:
+            if isRunning("com.spotify.client") {
+                AppleScriptRunner.run(#"tell application "Spotify" to pause"#)
+            } else {
+                mediaRemote.pause()
+            }
+        case .generic:
+            mediaRemote.pause()
+        }
+    }
+
+    private func isRunning(_ bundleID: String) -> Bool {
+        NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == bundleID }
     }
 
     // MARK: Start (background queue)
