@@ -492,6 +492,12 @@ forever.** Payment funds development and clears the nag; it never unlocks functi
 - **Batched & cheap.** Buffered locally, flushed infrequently over `NSURLSession` (respects
   the efficiency pillar — never chatty). Endpoint on the PureMac hub (§15).
 - Because it's GPLv3 and opt-in, the whole scheme is transparent and auditable.
+- **Built**: `DiagnosticsUploader.swift` sends `UsageStats.shareableSummary` at most once a
+  day, only when `DiagnosticsPreference.isEnabled`, fire-and-forget (a failed/skipped send
+  just retries next launch — no queue, no retry loop). Ingestion + an admin-secret-gated
+  dashboard (`puremac.yashashwi.me/fadeo/diagnostics`) live in the `portfolio` repo
+  (`lib/fadeo-diagnostics.js`, `app/api/fadeo-diagnostics/route.js`), backed by the same
+  Redis instance the free-license giveaway already uses.
 
 ### 13b. Notifications system
 - macOS user notifications via `UNUserNotificationCenter` for: trial expiry, the soft nag,
@@ -573,9 +579,9 @@ test loop; OS glue is thin and swappable.
 | **M2** | **Precedence engine** (4 bands + tiebreak chain) + **Conflict Simulator**; `ExternalConductor` (MediaRemote + Spotify/Music) | the deep customization + conducting real players |
 | **M3** ✅ | Remaining v1 sensors: Space (CGS shim) · Meeting (cam/mic) · Focus/Schedule (FSEvents + boundary timer). Also: real lazy sensor activation (a sensor starts only if an enabled workspace's `match` needs its fields) | all four triggers live |
 | **M4** ✅ | Full **Workspace editor UI** + Sound Library + Precedence UI + Conflict Simulator + Triggers UI (live sensor status) + two-way YAML editor | both halves of the customizability pillar |
-| **M5** (core done ✅, monetization/packaging deferred) | Done: **permissions/onboarding** (one-screen, real permission surface, includes the diagnostics opt-in) · **energy dashboard** (self-reported RSS + active sensor count) · **usage statistics** (local always-on tracking of time/switches per workspace, a Usage pane, and an opt-in coarse shareable summary with no send target yet) · real app icons throughout · searchable app picker · reset-to-defaults in Precedence. **Deferred, by user decision**: licensing ($2/14-day trial/soft nag), actually transmitting the opt-in diagnostics summary (no backend exists), Sparkle updater, notarization/signing, brand/logo redesign in progress by the user | core app is feature-complete; monetization + distribution are the remaining work |
+| **M5** (core done ✅, monetization/packaging deferred) | Done: **permissions/onboarding** (one-screen, real permission surface, includes the diagnostics opt-in) · **energy dashboard** (self-reported RSS + active sensor count) · **usage statistics** (local always-on tracking of time/switches per workspace, a Usage pane, and an opt-in coarse shareable summary) · **diagnostics now actually transmit** (`DiagnosticsUploader.swift` → the PureMac hub's ingestion endpoint + admin dashboard) · **resume-across-quit** (internal files and Apple Music/Spotify pick up at the exact position after a full quit, not just a brief pause) · real app icons throughout · searchable app picker · reset-to-defaults in Precedence. **Deferred, by user decision**: licensing ($2/14-day trial/soft nag), Sparkle updater, notarization/signing, brand/logo redesign in progress by the user | core app is feature-complete; monetization + distribution are the remaining work |
 | Later | Idle · browser URL · network/SSID · battery · headphones · calendar sensors; preset library; per-output-device routing; workspace import/share | breadth |
-| Site | **PureMac hub** (`puremac.yashashwi.me/fadeo`): storefront, download + Sparkle appcast, purchase, capped free-license generator, diagnostics dashboard | separate track, post-M5, blocked on Developer ID + hosting |
+| Site | **PureMac hub** (`puremac.yashashwi.me/fadeo`): storefront, download + Sparkle appcast, purchase, capped free-license generator, **diagnostics dashboard ✅** | remaining pieces (Sparkle appcast, download) blocked on Developer ID + notarization |
 
 ---
 
