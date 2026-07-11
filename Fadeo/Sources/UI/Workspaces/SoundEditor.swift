@@ -109,7 +109,9 @@ struct SoundEditor: View {
         }
         .fileImporter(
             isPresented: $showFileImporter,
-            allowedContentTypes: importingFolder ? [.folder] : [.audio],
+            // .movie alongside .audio so mp4/mov/m4v are selectable — AVAudioFile plays
+            // their audio track (music videos, screen recordings, etc.).
+            allowedContentTypes: importingFolder ? [.folder] : [.audio, .movie],
             allowsMultipleSelection: false
         ) { result in
             switch result {

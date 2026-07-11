@@ -51,8 +51,12 @@ final class InternalEngine {
 
     private(set) var state: AudioState = .silent
 
+    // Includes movie containers (mp4/m4v/mov): AVAudioFile reads their audio track fine,
+    // verified against ground truth, so folders of screen recordings or music videos
+    // play their audio.
     private static let supportedExtensions: Set<String> = [
         "mp3", "m4a", "aac", "wav", "aiff", "aif", "flac", "alac", "caf",
+        "mp4", "m4v", "mov", "m4b", "opus", "ogg",
     ]
 
     /// The app calls this whenever config reloads so folder/playlist sources always

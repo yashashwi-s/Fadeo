@@ -285,7 +285,11 @@ final class AppController: ObservableObject {
 
         // A timer toward this same target is already running: let it ride (its deadline
         // marks when the target has held long enough). A different target re-arms.
-        if pendingSwitch?.target == d.activeWorkspace { return }
+        // Crucially `if let` here, not `pendingSwitch?.target == d.activeWorkspace`: when
+        // BOTH are nil (no timer armed AND the decision is fade-to-silence) that plain
+        // comparison is `nil == nil` = true and we'd return without ever scheduling the
+        // stop — the audio then plays forever with the Now pane reading "would stop".
+        if let pending = pendingSwitch, pending.target == d.activeWorkspace { return }
         cancelPendingSwitch()
         let target = d.activeWorkspace
         let work = DispatchWorkItem { [weak self] in
@@ -312,26 +316,27 @@ final class AppController: ObservableObject {
         return current != nil && (d.target.action == .stop || d.target.action == .resumePrevious)
     }
 
-    /// The gate for a switch: the larger of (remaining minimum dwell of the current
-    /// workspace) and (the incoming workspace's enter delay, or the outgoing one's exit
-    /// delay when falling to silence). No gate at all when nothing is active — there is
-    /// nothing to protect, and first playback should be instant.
+    /// The gate before a switch commits. No gate when nothing is active (first playback
+    /// is instant). Switching to ANOTHER workspace honors min-dwell (anti-flap: don't
+    /// abandon a just-started workspace) and the incoming enter delay. Falling to SILENCE
+    /// (you left every matched app) is gated only by the short exit delay — min-dwell must
+    /// NOT keep audio playing for seconds after you've genuinely left, which reads as
+    /// "it won't stop".
     private func switchGateMs(decision d: Decision, current: String?) -> Int {
         let defaults = configStore.config.settings.defaults
         guard let current, let currentWS = configStore.config.workspaces.first(where: { $0.id == current }) else {
             return 0
         }
         let currentTiming = currentWS.timing.resolved(over: defaults)
-        let dwellRemaining = currentTiming.minDwellMs - Int(Date().timeIntervalSince(lastSwitchAt) * 1000)
 
-        let grace: Int
         if let targetID = d.activeWorkspace,
            let targetWS = configStore.config.workspaces.first(where: { $0.id == targetID }) {
-            grace = targetWS.timing.resolved(over: defaults).enterDelayMs
+            let dwellRemaining = currentTiming.minDwellMs - Int(Date().timeIntervalSince(lastSwitchAt) * 1000)
+            let enter = targetWS.timing.resolved(over: defaults).enterDelayMs
+            return max(dwellRemaining, enter, 0)
         } else {
-            grace = currentTiming.exitDelayMs
+            return max(currentTiming.exitDelayMs, 0)
         }
-        return max(dwellRemaining, grace, 0)
     }
 
     private func cancelPendingSwitch() {
