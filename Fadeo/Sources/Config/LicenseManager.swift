@@ -76,6 +76,13 @@ final class LicenseManager: ObservableObject {
             licenseError = "That license key isn't valid. Check for typos, or contact support if you believe this is an error."
             return false
         }
+        // Free-giveaway keys carry a deadline: unused (never entered here) for 7 days
+        // and they expire. Checked only at this first-activation moment, never again —
+        // an already-saved key in init() is trusted permanently regardless of this date.
+        if let deadline = payload.mustActivateBy, Date() > deadline {
+            licenseError = "This free license expired unused (it had to be activated within 7 days of being issued). Contact support if you believe this is an error."
+            return false
+        }
         UserDefaults.standard.set(key, forKey: Self.licenseKeyDefaultsKey)
         status = .licensed(payload)
         licenseError = nil

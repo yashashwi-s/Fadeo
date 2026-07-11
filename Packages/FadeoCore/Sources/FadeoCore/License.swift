@@ -8,11 +8,18 @@ public struct LicensePayload: Codable, Sendable, Equatable {
     public var id: String
     public var issuedAt: Date
     public var note: String?
+    /// Set only on free-giveaway keys: if this key is never activated (entered into the
+    /// app) before this date, `LicenseManager.activate` refuses it. Once activated, the
+    /// license is permanent — this deadline is never re-checked on later launches, only
+    /// at the moment of first activation. `nil` for every paid key (no such deadline).
+    public var mustActivateBy: Date?
 
-    public init(id: String = UUID().uuidString, issuedAt: Date = Date(), note: String? = nil) {
+    public init(id: String = UUID().uuidString, issuedAt: Date = Date(), note: String? = nil,
+                mustActivateBy: Date? = nil) {
         self.id = id
         self.issuedAt = issuedAt
         self.note = note
+        self.mustActivateBy = mustActivateBy
     }
 }
 

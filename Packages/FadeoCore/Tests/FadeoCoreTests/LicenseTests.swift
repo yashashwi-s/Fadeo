@@ -50,6 +50,43 @@ final class LicenseTests: XCTestCase {
         let forged = try License.sign(payload, privateKeyHex: key.privateHex)
         XCTAssertNil(License.verify(forged))
     }
+
+    // mustActivateBy (free-giveaway expiry) ------------------------------------------
+
+    func testMustActivateByRoundTrips() throws {
+        let deadline = Date(timeIntervalSince1970: 1_700_600_000)
+        let payload = LicensePayload(id: "promo-1", issuedAt: Date(timeIntervalSince1970: 1_700_000_000),
+                                     note: "promo-1", mustActivateBy: deadline)
+        let key = try TestCrypto.makeKeyPair()
+        let signed = try License.sign(payload, privateKeyHex: key.privateHex)
+        let decoded = TestCrypto.verify(signed, publicKeyHex: key.publicHex)
+        XCTAssertEqual(decoded?.mustActivateBy, deadline)
+    }
+
+    func testPaidKeyHasNoActivationDeadline() throws {
+        let payload = LicensePayload(id: "paid-1", issuedAt: Date(), note: "gumroad")
+        let key = try TestCrypto.makeKeyPair()
+        let signed = try License.sign(payload, privateKeyHex: key.privateHex)
+        let decoded = TestCrypto.verify(signed, publicKeyHex: key.publicHex)
+        XCTAssertNil(decoded?.mustActivateBy)
+    }
+
+    func testOldFormatKeyWithoutMustActivateByStillDecodes() throws {
+        // A key signed before this field existed (no "mustActivateBy" in the JSON at
+        // all) must still verify and decode -- this is what makes the field additive
+        // rather than a breaking format change for already-issued keys.
+        let key = try TestCrypto.makeKeyPair()
+        let legacyPayloadJSON = """
+        {"id":"legacy-1","issuedAt":"2025-01-01T00:00:00Z","note":"legacy"}
+        """
+        let payloadData = Data(legacyPayloadJSON.utf8)
+        let privateKey = try Curve25519.Signing.PrivateKey(rawRepresentation: Data(hexEncoded: key.privateHex)!)
+        let signature = try privateKey.signature(for: payloadData)
+        let signed = "FADEO1.\(payloadData.base64URLEncodedString()).\(signature.base64URLEncodedString())"
+        let decoded = TestCrypto.verify(signed, publicKeyHex: key.publicHex)
+        XCTAssertEqual(decoded?.id, "legacy-1")
+        XCTAssertNil(decoded?.mustActivateBy)
+    }
 }
 
 /// Minimal test-only mirror of License's crypto so we can exercise sign/verify with a
