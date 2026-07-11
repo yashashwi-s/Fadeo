@@ -68,7 +68,7 @@ struct SoundLibraryPane: View {
         panel.canChooseFiles = !folder
         panel.canChooseDirectories = folder
         panel.allowsMultipleSelection = false
-        if !folder { panel.allowedContentTypes = [.audio] }
+        if !folder { panel.allowedContentTypes = [.audio, .movie] }
         panel.prompt = "Add"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         var cfg = config

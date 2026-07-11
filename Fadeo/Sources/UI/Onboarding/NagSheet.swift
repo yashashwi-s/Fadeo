@@ -119,7 +119,7 @@ struct NagSheet: View {
             Divider()
 
             Toggle("Also share anonymous usage data", isOn: $diagnosticsOptIn)
-            Text("A coarse summary only: session count, days used, workspace count, switches, and total active time. Never workspace or app names, or file paths.")
+            Text("A coarse summary only: session count, days used, workspace count, switches, and total active time. Never workspace or app names, or file paths. There's no server to send it to yet, so this doesn't transmit anything today — it just marks your preference for when that exists.")
                 .font(.caption2).foregroundStyle(.secondary)
 
             HStack {

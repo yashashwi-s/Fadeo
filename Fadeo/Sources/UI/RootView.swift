@@ -1,8 +1,7 @@
 import SwiftUI
 
-/// The full-app sidebar shell. M0 ships the navigation, the live **Now** dashboard, and
-/// a real **Preferences** pane; the remaining panes are placeholders that fill in across
-/// M1–M4 behind this same structure.
+/// The full-app sidebar shell. Every pane is implemented; RootView's switch below routes
+/// each `Pane` case to its real view directly (no fallback path).
 enum Pane: String, CaseIterable, Identifiable {
     case now = "Now"
     case workspaces = "Workspaces"
@@ -27,18 +26,6 @@ enum Pane: String, CaseIterable, Identifiable {
         case .preferences: return "gearshape"
         case .advanced: return "curlybraces"
         case .about: return "info.circle"
-        }
-    }
-
-    var milestone: String? {
-        switch self {
-        case .now, .preferences, .about: return nil
-        case .workspaces: return "M1 · M4"
-        case .soundLibrary: return "M2 · M4"
-        case .precedence: return "M2"
-        case .triggers: return "M3"
-        case .usage: return "M5"
-        case .advanced: return "M4"
         }
     }
 }
@@ -87,7 +74,6 @@ struct RootView: View {
                 case .advanced: AdvancedPane()
                 case .preferences: PreferencesPane()
                 case .about: AboutPane()
-                default: PlaceholderPane(pane: selection)
                 }
             }
             .frame(minWidth: 560, minHeight: 520)

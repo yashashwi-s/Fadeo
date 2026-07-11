@@ -207,7 +207,10 @@ fall back through the lower bands (and typically **resume** what was playing).
 
 ### Band 2 — Candidate set
 Collect every non-override workspace whose `match` currently holds. Membership requires
-the frontmost app be a member **and** any extra constraints (space/time/focus) hold.
+the frontmost app be a member **and** any extra constraints (space/time/focus) hold. A
+workspace whose match has no conditions at all is never a candidate — an empty match is
+inert, not a catch-all, so a freshly created workspace stays silent until you give it a
+condition.
 - **0 candidates →** Band 4 (Fallback).
 - **1 candidate →** it's active. Done.
 - **>1 →** Band 3.

@@ -61,6 +61,10 @@ final class ExternalConductor {
 
     private let mediaRemote = MediaRemoteBridge()
     private(set) var state: AudioState = .silent
+    /// Fired (hopped to main) when a bounded verify loop gives up. Informational only —
+    /// unlike InternalEngine, we never touch `state` here, since AppleScript read-back is
+    /// unreliable by design (PLAN.md) and we don't want a false negative to desync it.
+    var onPlaybackIssue: ((String) -> Void)?
 
     /// Serial: AppleScript calls are inherently ordered (launch → cue → play → volume),
     /// and this keeps them off the main thread.
@@ -96,6 +100,19 @@ final class ExternalConductor {
             state.volume = volume
             let target = parse(state.source ?? "")
             work.async { [weak self] in self?.performSetVolume(volume, target: target) }
+        case .pause:
+            // Same underlying action as `.stop` (Music/Spotify only ever get paused, never
+            // torn down here — see performStop's doc comment), but keep the source so a
+            // `.resume` for the SAME source can tell it's continuing, not starting fresh.
+            let target = parse(state.source ?? "")
+            state = AudioState(source: state.source, volume: state.volume, playing: false, paused: true)
+            work.async { [weak self] in self?.performStop(target: target) }
+        case .resume(let volume, _):
+            // Never re-cue: Music/Spotify already remember exactly where they paused, so
+            // resuming just needs a bare `play`, not the whole open-location/verify dance.
+            state = AudioState(source: state.source, volume: volume, playing: true, paused: false)
+            let target = parse(state.source ?? "")
+            work.async { [weak self] in self?.performResume(target: target, volume: volume) }
         case .stop:
             // Capture which app we were conducting BEFORE clearing state.
             let target = parse(state.source ?? "")
@@ -135,6 +152,34 @@ final class ExternalConductor {
         NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == bundleID }
     }
 
+    /// Manual "skip forward" (menu bar control) — generic transport, whichever app
+    /// currently holds Now Playing.
+    func next() { mediaRemote.next() }
+
+    /// Resume from a `pause()`, never re-cueing (no `open location`, no verify loop) —
+    /// Music/Spotify already hold the exact paused position, so a bare `play` continues
+    /// it. Only launches the app if it's still running from the pause (never headless-
+    /// launches here; if it quit in the meantime there's nothing to resume into).
+    private func performResume(target: Target, volume: Double) {
+        switch target {
+        case .appleMusic:
+            if isRunning("com.apple.Music") {
+                AppleScriptRunner.run(#"tell application "Music" to play"#)
+            } else {
+                mediaRemote.play()
+            }
+        case .spotify:
+            if isRunning("com.spotify.client") {
+                AppleScriptRunner.run(#"tell application "Spotify" to play"#)
+            } else {
+                mediaRemote.play()
+            }
+        case .generic:
+            mediaRemote.play()
+        }
+        performSetVolume(volume, target: target)
+    }
+
     // MARK: Start (background queue)
 
     private func performStart(target: Target, volume: Double, order: PlaybackOrder, repeatMode: RepeatMode, generation gen: Int) {
@@ -144,6 +189,21 @@ final class ExternalConductor {
 
         case .appleMusic(let playlist), .spotify(let playlist):
             guard let appName = target.appName, let bundleID = target.bundleID else { return }
+            guard NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) != nil else {
+                // The target app isn't installed. Fall back to opening the share link in
+                // the default browser — this is promised in the Sound Library UI, and
+                // without it we'd otherwise burn ~30s waiting on `waitUntilScriptable`/
+                // `verifyPlaying` for an app that will never answer, before finally
+                // reporting a failure. A local playlist name (no URL) has no browser
+                // fallback — there's nothing to open.
+                if let playlist, let url = shareLinkURL(playlist) {
+                    DispatchQueue.main.async { NSWorkspace.shared.open(url) }
+                } else {
+                    let issue = onPlaybackIssue
+                    DispatchQueue.main.async { issue?("\(appName) isn't installed") }
+                }
+                return
+            }
             launchHeadlessAndWait(bundleID: bundleID)
             guard isCurrent(gen) else { return }
 
@@ -180,7 +240,16 @@ final class ExternalConductor {
             guard isCurrent(gen) else { return }
             // Shuffle/repeat only stick once something is actually playing — an empty
             // queue can't shuffle — so set them AFTER playback is confirmed, not before.
-            applyShuffleRepeat(appName: appName, order: order, repeatMode: repeatMode)
+            //
+            // A single pasted song forces repeat-one regardless of the workspace's
+            // configured repeatMode: neither Music nor Spotify exposes an AppleScript
+            // property to disable their own "Autoplay"/"Radio" continuation (checked
+            // Music's AppleScript dictionary directly — no such property exists), so
+            // repeat-off on a single-song "queue" lets the app fill in with an unrelated
+            // song once it ends. Looping the same song is the only way to get defined,
+            // repeatable behavior out of a single share link.
+            let effectiveRepeat = isSingleTrackLink(target: target, playlist: playlist) ? RepeatMode.one : repeatMode
+            applyShuffleRepeat(appName: appName, order: order, repeatMode: effectiveRepeat)
             performSetVolume(volume, target: target)
         }
     }
@@ -247,6 +316,8 @@ final class ExternalConductor {
             Thread.sleep(forTimeInterval: 0.7)
         }
         NSLog("Fadeo ExternalConductor: \(appName) did not reach playing state in time")
+        let issue = onPlaybackIssue
+        DispatchQueue.main.async { issue?("\(appName) did not start playing") }
     }
 
     private func playerState(appName: String) -> String? {
@@ -311,5 +382,26 @@ final class ExternalConductor {
     private func shareLinkURL(_ s: String) -> URL? {
         guard s.hasPrefix("http://") || s.hasPrefix("https://"), let url = URL(string: s) else { return nil }
         return url
+    }
+
+    /// True when `playlist` names one specific song rather than an album/playlist (a
+    /// real queue, where looping doesn't make sense). Music share links for an individual
+    /// track carry an `i=<trackId>` query parameter; a bare album/playlist link doesn't.
+    /// Spotify: a `/track/` path segment or a `spotify:track:` URI.
+    private func isSingleTrackLink(target: Target, playlist: String?) -> Bool {
+        guard let playlist else { return false }
+        if let url = shareLinkURL(playlist) {
+            switch target {
+            case .appleMusic:
+                return URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                    .queryItems?.contains(where: { $0.name == "i" }) ?? false
+            case .spotify:
+                return url.path.split(separator: "/").map(String.init).contains("track")
+            case .generic:
+                return false
+            }
+        }
+        if case .spotify = target { return playlist.hasPrefix("spotify:track:") }
+        return false
     }
 }

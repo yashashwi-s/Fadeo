@@ -174,12 +174,23 @@ public struct Match: Codable, Sendable, Equatable {
         self.weekdays = try c.decodeIfPresent([Int].self, forKey: .weekdays) ?? []
         self.combine = try c.decodeIfPresent(MatchCombine.self, forKey: .combine) ?? .all
     }
+
+    /// True when no condition of any kind is set. Such a match never activates (see Resolver).
+    public var isEmpty: Bool {
+        apps.isEmpty && spaces.isEmpty && focus.isEmpty && weekdays.isEmpty
+            && meeting == nil && timeBetween == nil
+    }
 }
 
 // MARK: - Sound (what a workspace does)
 
 public enum SoundAction: String, Codable, Sendable {
-    case play, pause, stop, setVolume, duck, resumePrevious, doNothing
+    case play, pause, stop, setVolume
+    /// Lower playback to THIS workspace's volume while it matches; the previous
+    /// workspace's own volume is restored when it wins again (Reconciler maps this to
+    /// `.setVolume` whenever something is already playing, `.none` when silent).
+    case duck
+    case resumePrevious, doNothing
 }
 
 /// Playback order for a multi-file source (`internal:folder:` / `internal:playlist:`).
@@ -437,7 +448,7 @@ public struct Settings: Codable, Sendable, Equatable {
 
     public init(
         evaluationDebounceMs: Int = 300,
-        tiebreak: [TiebreakStrategy] = [.stickiness, .specificity, .priority, .recency, .stableId],
+        tiebreak: [TiebreakStrategy] = [.stickiness, .specificity, .priority, .stableId],
         fallback: Fallback = .keepCurrent,
         fallbackFadeMs: Int = 1500,
         meeting: MeetingTrigger = .cameraOrMic,
@@ -455,7 +466,7 @@ public struct Settings: Codable, Sendable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         evaluationDebounceMs = try c.decodeIfPresent(Int.self, forKey: .evaluationDebounceMs) ?? 300
         tiebreak = try c.decodeIfPresent([TiebreakStrategy].self, forKey: .tiebreak)
-            ?? [.stickiness, .specificity, .priority, .recency, .stableId]
+            ?? [.stickiness, .specificity, .priority, .stableId]
         fallback = try c.decodeIfPresent(Fallback.self, forKey: .fallback) ?? .keepCurrent
         fallbackFadeMs = try c.decodeIfPresent(Int.self, forKey: .fallbackFadeMs) ?? 1500
         meeting = try c.decodeIfPresent(MeetingTrigger.self, forKey: .meeting) ?? .cameraOrMic

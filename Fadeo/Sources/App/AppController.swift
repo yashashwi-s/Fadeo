@@ -14,6 +14,7 @@ final class AppController: ObservableObject {
     @Published private(set) var recentEvents: [String] = []
     @Published private(set) var eventCount: Int = 0
     @Published private(set) var audioStatus: String = "silent"
+    @Published private(set) var audioIssue: String?
     @Published var automationPaused = false {
         didSet {
             if automationPaused {
@@ -26,11 +27,20 @@ final class AppController: ObservableObject {
                 activeActuator = .none
                 audioState = .silent
                 updateAudioStatus()
+                cancelPendingSwitch()
+                cancelPausedTeardown()
             } else {
+                manuallyPaused = false   // don't leave a stale manual pause blocking evaluate()
                 evaluate()
             }
         }
     }
+    /// A manual pause from the menu bar's play/pause button. Distinct from
+    /// `automationPaused`: automation-paused stops audio AND disables all workspace
+    /// switching; manually-paused only silences the current audio — Fadeo keeps tracking
+    /// which workspace *would* be active, and un-pausing resumes exactly where the paused
+    /// source left off (or picks up whatever's current, if the context moved on).
+    @Published private(set) var manuallyPaused = false
 
     let configStore: ConfigStore
     let usageStore = UsageStore()
@@ -74,6 +84,8 @@ final class AppController: ObservableObject {
     // any evaluation that re-affirms the current workspace cancels it, so a switch only
     // commits if the new target held continuously for its grace period.
     private var pendingSwitch: (target: String?, work: DispatchWorkItem)?
+    /// Bounded hard-teardown for a resumable pause (see `armPausedTeardown`).
+    private var pausedTeardownTimer: DispatchWorkItem?
     private var lastSwitchAt: Date = .distantPast
 
     let startedAt = Date()
@@ -97,12 +109,32 @@ final class AppController: ObservableObject {
                 guard let self else { return }
                 self.engine.updateLocalPlaylists(cfg.localPlaylists)
                 self.scheduleSensor.reschedule(workspaces: cfg.workspaces)
+                self.usageStore.prune(keeping: Set(cfg.workspaces.map(\.id)))
                 DispatchQueue.main.async {
                     self.reconcileSensors()
                     self.evaluate()
                 }
             }
             .store(in: &cancellables)
+
+        engine.onPlaybackEnded = { [weak self] reason in
+            guard let self, self.activeActuator == .internalEngine else { return }
+            self.activeActuator = .none
+            switch reason {
+            case .finished:
+                // Keep the source with finished=true: the reconciler must not restart a
+                // completed play-once queue on the next context tick. Cleared on workspace switch.
+                self.audioState = AudioState(source: self.audioState.source,
+                                             volume: self.audioState.volume,
+                                             playing: false, finished: true)
+                self.audioIssue = nil
+            case .failed(let why):
+                self.audioState = .silent   // a later real event may retry; no synchronous retry here
+                self.audioIssue = why
+            }
+            self.updateAudioStatus()
+        }
+        external.onPlaybackIssue = { [weak self] msg in self?.audioIssue = msg }
 
         reconcileSensors()
         evaluate()
@@ -122,6 +154,19 @@ final class AppController: ObservableObject {
         guard let id = resolverState.activeWorkspace else { return nil }
         return configStore.config.workspaces.first { $0.id == id }?.name
     }
+
+    /// The workspace the live decision currently names, for display (menu bar dropdown,
+    /// the always-visible menu bar glyph). `decision` (not `resolverState`) so this always
+    /// reflects what's actually live, gated or not — same rule as the Now pane.
+    var activeWorkspaceForDisplay: Workspace? {
+        configStore.config.workspaces.first { $0.id == decision?.activeWorkspace }
+    }
+
+    /// Whether there's a live or manually-paused session for the menu bar's play/pause/
+    /// skip controls to act on (as opposed to true silence, where those controls have
+    /// nothing to do).
+    var canControlPlayback: Bool { activeActuator != .none }
+    var isAudioPlaying: Bool { audioState.playing }
 
     // MARK: Sensor status (for the Triggers pane)
 
@@ -232,6 +277,8 @@ final class AppController: ObservableObject {
             external.execute(.stop(fadeMs: 150))
             audioState = .silent
             activeActuator = .none
+            cancelPendingSwitch()
+            cancelPausedTeardown()
         }
         previewEngine.updateLocalPlaylists(configStore.config.localPlaylists)
         previewEngine.execute(.stop(fadeMs: 0))
@@ -250,8 +297,47 @@ final class AppController: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.evaluate() }
     }
 
-    private func evaluate() {
+    // MARK: Manual playback controls (menu bar)
+
+    /// Toggle a manual pause. Pausing holds the session open (same resumable mechanism
+    /// as a transient context fallback, see `AudioCommand.pause`) with no bounded
+    /// teardown — a deliberate pause stays paused until the user hits play again, however
+    /// long that takes. Resuming re-evaluates: normally that's the exact same source
+    /// continuing from where it paused, but if the context moved on while paused (a
+    /// different app now matches), the new workspace's own audio starts instead.
+    func togglePlayPause() {
         guard !automationPaused, !isPreviewing else { return }
+        if manuallyPaused {
+            manuallyPaused = false
+            evaluate()
+        } else {
+            guard audioState.playing, activeActuator != .none else { return }
+            manuallyPaused = true
+            cancelPendingSwitch()
+            let command = AudioCommand.pause(fadeMs: configStore.config.settings.defaults.fadeOutMs)
+            switch activeActuator {
+            case .internalEngine: engine.execute(command)
+            case .external: external.execute(command)
+            case .none: return
+            }
+            audioState = AudioState(source: audioState.source, volume: audioState.volume, playing: false, paused: true)
+            updateAudioStatus()
+        }
+    }
+
+    /// Skip to the next track (internal file/folder/playlist queue) or the next item in
+    /// whatever external app holds Now Playing. A no-op for ambient noise presets (there
+    /// is no "next" for a continuous synthesized texture) and while nothing is playing.
+    func skipNext() {
+        switch activeActuator {
+        case .internalEngine: engine.skipToNext()
+        case .external: external.next()
+        case .none: break
+        }
+    }
+
+    private func evaluate() {
+        guard !automationPaused, !isPreviewing, !manuallyPaused else { return }
         context.localTime = Date()
         let d = resolver.resolve(context: context, config: configStore.config, state: resolverState)
         decision = d   // the Now pane always shows the live resolution, gated or not
@@ -295,6 +381,7 @@ final class AppController: ObservableObject {
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.pendingSwitch = nil
+            guard !self.automationPaused, !self.isPreviewing else { return }
             self.context.localTime = Date()
             let fresh = self.resolver.resolve(context: self.context, config: self.configStore.config, state: self.resolverState)
             self.decision = fresh
@@ -354,7 +441,10 @@ final class AppController: ObservableObject {
         } else if d.target.action == .stop || d.target.action == .resumePrevious {
             resolverState.activeWorkspace = nil
         }
-        if resolverState.activeWorkspace != before { lastSwitchAt = Date() }
+        if resolverState.activeWorkspace != before {
+            lastSwitchAt = Date()
+            audioState.finished = false
+        }
         recordUsageIfWorkspaceChanged(newWorkspaceID: d.activeWorkspace)
         applyAudio(d)
     }
@@ -382,13 +472,13 @@ final class AppController: ObservableObject {
         let command = reconciler.reconcile(current: audioState, target: target, transition: d.transition)
 
         // Decide which actuator this command belongs to. A start/crossfade names its
-        // source explicitly; a bare stop/setVolume applies to whichever actuator is
-        // already playing (a rule never targets both at once).
+        // source explicitly; a bare stop/pause/resume/setVolume applies to whichever
+        // actuator is already playing (a rule never targets both at once).
         let destination: Actuator
         switch command {
         case .start(let s, _, _), .crossfade(let s, _, _):
             destination = s.hasPrefix("external:") ? .external : .internalEngine
-        case .setVolume, .stop:
+        case .setVolume, .stop, .pause, .resume:
             destination = activeActuator
         case .none:
             destination = activeActuator
@@ -404,7 +494,7 @@ final class AppController: ObservableObject {
         let isHandoff: Bool
         switch command {
         case .start, .crossfade: isHandoff = destination != activeActuator && activeActuator != .none
-        case .none, .setVolume, .stop: isHandoff = false
+        case .none, .setVolume, .stop, .pause, .resume: isHandoff = false
         }
         if isHandoff {
             let fadeMs = { if case .crossfade = command { return d.transition.timing.crossfadeMs }
@@ -425,25 +515,69 @@ final class AppController: ObservableObject {
         if case .start = command { activeActuator = destination }
         if case .crossfade = command { activeActuator = destination }
         if case .stop = command { activeActuator = .none }
+        // .pause/.resume: activeActuator is unchanged — it still "owns" playback, just
+        // silenced or un-silenced in place.
 
         // Optimistically mirror the command into our tracked state (matches the reconciler's
         // model, so we don't re-issue the same fade every context tick).
         switch command {
         case .start(let s, let v, _), .crossfade(let s, let v, _):
             audioState = AudioState(source: s, volume: v, playing: true)
+            audioIssue = nil
+        case .resume(let v, _):
+            audioState = AudioState(source: audioState.source, volume: v, playing: true, paused: false)
+            audioIssue = nil
         case .setVolume(let v, _):
             audioState.volume = v
+        case .pause:
+            audioState = AudioState(source: audioState.source, volume: audioState.volume, playing: false, paused: true)
         case .stop:
             audioState = .silent
         case .none:
             break
         }
+        // A resumable pause holds the engine/session open — fine for a brief glance away,
+        // but left unchecked it would violate the "torn down at idle" contract for a
+        // genuinely long absence. Arm a bounded hard-teardown; any other command (resumed,
+        // switched to something else, or a deliberate stop) cancels it.
+        if case .pause = command {
+            armPausedTeardown()
+        } else {
+            cancelPausedTeardown()
+        }
         updateAudioStatus()
+    }
+
+    /// How long a resumable pause is held open before it's torn down for real. Long
+    /// enough to cover a menu-bar click, Mission Control, or a brief tab-away; short
+    /// enough that walking away for real still returns Fadeo to ~0% idle.
+    private static let pausedTeardownGraceSeconds: TimeInterval = 120
+
+    private func armPausedTeardown() {
+        cancelPausedTeardown()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.audioState.paused else { return }
+            switch self.activeActuator {
+            case .internalEngine: self.engine.execute(.stop(fadeMs: 0))
+            case .external: self.external.execute(.stop(fadeMs: 0))
+            case .none: break
+            }
+            self.activeActuator = .none
+            self.audioState = .silent
+            self.updateAudioStatus()
+        }
+        pausedTeardownTimer = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.pausedTeardownGraceSeconds, execute: work)
+    }
+
+    private func cancelPausedTeardown() {
+        pausedTeardownTimer?.cancel()
+        pausedTeardownTimer = nil
     }
 
     private func updateAudioStatus() {
         guard audioState.playing, let s = audioState.source else {
-            audioStatus = "silent"
+            audioStatus = audioState.paused ? "paused" : (audioState.finished ? "finished" : "silent")
             return
         }
         let name = s.split(separator: ":").last.map(String.init) ?? s

@@ -346,7 +346,7 @@ struct SoundEditor: View {
     }
 
     private var shareLinkExplanation: String {
-        "A pasted share link opens directly in the \(externalProvider == "spotify" ? "Spotify" : "Music") app on this Mac, not a browser. If that app isn't installed, it opens in your browser instead."
+        "A pasted share link opens directly in the \(externalProvider == "spotify" ? "Spotify" : "Music") app on this Mac, not a browser. If that app isn't installed, it opens in your browser instead. A single-song link repeats that song, since neither app lets us turn off its own autoplay/radio continuation."
     }
 
     private func rebuildExternal(provider: String, playlist: String) {

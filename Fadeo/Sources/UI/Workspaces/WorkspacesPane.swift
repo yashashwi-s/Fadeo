@@ -34,6 +34,9 @@ struct WorkspacesPane: View {
                     Circle().fill(Brand.swatch(ws.color)).frame(width: 8, height: 8)
                     Text(ws.name)
                     Spacer()
+                    if ws.match.isEmpty {
+                        Image(systemName: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+                    }
                     if ws.isOverride {
                         Image(systemName: "exclamationmark.circle").font(.caption).foregroundStyle(.secondary)
                     }

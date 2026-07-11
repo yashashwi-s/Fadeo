@@ -7,9 +7,10 @@ final class ResolverTests: XCTestCase {
     // Helpers -----------------------------------------------------------------
     func ws(_ id: String, apps: [AppMembership] = [], spaces: [Int] = [],
             priority: Int = 0, override: Bool = false, meeting: Bool? = nil,
-            action: SoundAction = .play, source: String? = "internal:preset:x") -> Workspace {
-        Workspace(id: id, name: id, isOverride: override, priority: priority,
-                  match: Match(apps: apps, spaces: spaces, meeting: meeting),
+            action: SoundAction = .play, source: String? = "internal:preset:x",
+            combine: MatchCombine = .all, enabled: Bool = true) -> Workspace {
+        Workspace(id: id, name: id, enabled: enabled, isOverride: override, priority: priority,
+                  match: Match(apps: apps, spaces: spaces, meeting: meeting, combine: combine),
                   sound: Sound(source: source, action: action))
     }
     func strong(_ b: String) -> AppMembership { AppMembership(bundle: b, strength: .strong) }
@@ -134,6 +135,7 @@ final class ResolverTests: XCTestCase {
         let d = r.resolve(context: ctx(app: "Unrelated"), config: cfg,
                           state: ResolverState(activeWorkspace: "deep"))
         XCTAssertEqual(d.target.action, .stop)
+        XCTAssertTrue(d.target.resumable, "a transient no-match fallback must be resumable, not a hard stop")
     }
 
     // Per-app override --------------------------------------------------------
@@ -160,5 +162,87 @@ final class ResolverTests: XCTestCase {
             XCTAssertEqual(r.resolve(context: ctx(app: "X"), config: cfg).activeWorkspace,
                            first.activeWorkspace)
         }
+    }
+
+    // Empty match: inert, not a catch-all --------------------------------------
+    func testEmptyMatchNeverMatches() {
+        let cfg = Config(settings: Settings(fallback: .silence), workspaces: [ws("empty")])
+        let d = r.resolve(context: ctx(app: "AnyApp"), config: cfg)
+        XCTAssertNil(d.activeWorkspace)
+        XCTAssertEqual(d.reason.band, .fallback)
+    }
+
+    func testEmptyMatchCannotStick() {
+        let cfg = Config(workspaces: [ws("empty"), ws("appMatched", apps: [strong("X")])])
+        let d = r.resolve(context: ctx(app: "X"), config: cfg,
+                          state: ResolverState(activeWorkspace: "empty"))
+        XCTAssertEqual(d.activeWorkspace, "appMatched")
+    }
+
+    // Override band -------------------------------------------------------------
+    func testOverrideWithPlaySoundPlays() {
+        let cfg = Config(workspaces: [
+            ws("meet", override: true, meeting: true, action: .play, source: "internal:preset:brown"),
+        ])
+        let d = r.resolve(context: ctx(app: "X", camera: true), config: cfg)
+        XCTAssertEqual(d.activeWorkspace, "meet")
+        XCTAssertEqual(d.target.action, .play)
+        XCTAssertEqual(d.target.source, "internal:preset:brown")
+    }
+
+    func testOverrideTieUsesChain() {
+        // Two overrides with equal priority both match; the currently active one should
+        // win via stickiness rather than an arbitrary priority/id tiebreak.
+        let cfg = Config(workspaces: [
+            ws("meetA", priority: 50, override: true, meeting: true),
+            ws("meetB", priority: 50, override: true, meeting: true),
+        ])
+        let d = r.resolve(context: ctx(camera: true), config: cfg,
+                          state: ResolverState(activeWorkspace: "meetB"))
+        XCTAssertEqual(d.activeWorkspace, "meetB")
+        XCTAssertEqual(d.reason.deciding, .stickiness)
+    }
+
+    // Nil context fields --------------------------------------------------------
+    func testNilSpaceFailsCombineAll() {
+        let cfg = Config(workspaces: [ws("dw", apps: [strong("X")], spaces: [1], combine: .all)])
+        let d = r.resolve(context: ctx(app: "X", space: nil), config: cfg)
+        XCTAssertNotEqual(d.activeWorkspace, "dw")
+    }
+
+    func testNilSpaceStillMatchesUnderAny() {
+        let cfg = Config(workspaces: [ws("dw", apps: [strong("X")], spaces: [1], combine: .any)])
+        let d = r.resolve(context: ctx(app: "X", space: nil), config: cfg)
+        XCTAssertEqual(d.activeWorkspace, "dw")
+    }
+
+    // Weak preserve requires enabled ---------------------------------------------
+    func testWeakPreserveRequiresEnabled() {
+        let cfg = Config(settings: Settings(fallback: .silence), workspaces: [
+            ws("deep", apps: [strong("Xcode")], enabled: false),
+            Workspace(id: "chatspace", name: "chatspace",
+                      match: Match(apps: [weak("Slack")]),
+                      sound: Sound(source: "internal:preset:lofi")),
+        ])
+        let d = r.resolve(context: ctx(app: "Slack"), config: cfg,
+                          state: ResolverState(activeWorkspace: "deep"))
+        XCTAssertNil(d.activeWorkspace, "a disabled workspace must not be preserved by a weak match")
+    }
+
+    // Duplicate bundle entries ----------------------------------------------------
+    func testDuplicateBundlePrefersStrong() {
+        let cfg = Config(workspaces: [ws("dw", apps: [weak("X"), strong("X")])])
+        let d = r.resolve(context: ctx(app: "X"), config: cfg)
+        XCTAssertEqual(d.activeWorkspace, "dw", "a bundle listed both weak and strong should activate")
+    }
+
+    // Recency tiebreak ------------------------------------------------------------
+    func testRecencySkipsWhenAllCold() {
+        let cfg = Config(settings: Settings(tiebreak: [.recency, .stableId]), workspaces: [
+            ws("B", apps: [strong("X")]), ws("A", apps: [strong("X")]),
+        ])
+        let d = r.resolve(context: ctx(app: "X"), config: cfg)
+        XCTAssertEqual(d.reason.deciding, .stableId, "with no lastActive signal, recency must fall through")
+        XCTAssertEqual(d.activeWorkspace, "A")
     }
 }

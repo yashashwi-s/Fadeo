@@ -29,7 +29,15 @@ struct FadeoApp: App {
                 .environmentObject(controller)
                 .environmentObject(configStore)
         } label: {
-            Image(systemName: "waveform")
+            // A small colored dot next to the icon names which workspace is live, without
+            // requiring a click — the same "colored dot = workspace" language used
+            // everywhere else in the app (sidebar, this menu's own dropdown header).
+            HStack(spacing: 3) {
+                Image(systemName: "waveform")
+                if let ws = controller.activeWorkspaceForDisplay {
+                    Circle().fill(Brand.swatch(ws.color)).frame(width: 6, height: 6)
+                }
+            }
         }
         .menuBarExtraStyle(.window)
     }

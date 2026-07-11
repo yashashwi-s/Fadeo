@@ -6,11 +6,22 @@ public struct AudioState: Sendable, Equatable {
     public var source: String?
     public var volume: Double
     public var playing: Bool
+    /// The source ran to natural completion (repeat-off queue exhausted). Distinct from a
+    /// failure: a finished play-once source must not restart on the next context tick.
+    public var finished: Bool
+    /// Held open in a resumable, silent state — not torn down, exact position (queue index,
+    /// file playback position for internal files; the external app's own remembered
+    /// position for Music/Spotify) preserved. Distinct from a full stop: reappearing on the
+    /// SAME source resumes in place instead of restarting from the beginning.
+    public var paused: Bool
 
-    public init(source: String? = nil, volume: Double = 0, playing: Bool = false) {
+    public init(source: String? = nil, volume: Double = 0, playing: Bool = false,
+                finished: Bool = false, paused: Bool = false) {
         self.source = source
         self.volume = volume
         self.playing = playing
+        self.finished = finished
+        self.paused = paused
     }
 
     public static let silent = AudioState()
@@ -24,6 +35,10 @@ public enum AudioCommand: Sendable, Equatable {
     case start(source: String, volume: Double, fadeMs: Int)
     case crossfade(to: String, volume: Double, ms: Int)
     case setVolume(Double, ms: Int)
+    /// Ramp to silence but hold the session open, resumable in place (see `AudioState.paused`).
+    case pause(fadeMs: Int)
+    /// Ramp back up in place — never re-schedules/re-cues, unlike `.start`.
+    case resume(volume: Double, fadeMs: Int)
     case stop(fadeMs: Int)
 }
 
@@ -40,7 +55,12 @@ public struct Reconciler {
             return .none
 
         case .pause, .stop:
-            return current.playing ? .stop(fadeMs: t.fadeOutMs) : .none
+            guard current.playing else { return .none }
+            // `target.resumable` is set only by a transient "nothing matches right now"
+            // fallback decision (Resolver), never by a workspace's own configured pause/
+            // stop action — those are deliberate steady states where a full teardown is
+            // correct and matches the efficiency contract.
+            return target.resumable ? .pause(fadeMs: t.fadeOutMs) : .stop(fadeMs: t.fadeOutMs)
 
         case .setVolume, .duck:
             guard current.playing else { return .none }
@@ -48,7 +68,14 @@ public struct Reconciler {
 
         case .play:
             guard let src = target.source else {
-                return current.playing ? .stop(fadeMs: t.fadeOutMs) : .none
+                guard current.playing else { return .none }
+                return target.resumable ? .pause(fadeMs: t.fadeOutMs) : .stop(fadeMs: t.fadeOutMs)
+            }
+            if current.finished, current.source == src, target.repeatMode == .off {
+                return .none   // play-once queue already completed; a context tick must not restart it
+            }
+            if current.paused, current.source == src {
+                return .resume(volume: target.volume, fadeMs: t.fadeInMs)   // exact-position resume, not a restart
             }
             if !current.playing {
                 return .start(source: src, volume: target.volume, fadeMs: t.fadeInMs)

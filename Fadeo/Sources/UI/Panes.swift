@@ -60,12 +60,18 @@ struct NowPane: View {
     }
 
     private var audio: some View {
-        HStack(spacing: 10) {
-            Image(systemName: controller.audioStatus == "silent" ? "speaker.slash" : "speaker.wave.2")
-                .foregroundStyle(.secondary)
-                .frame(width: 20)
-            Text(controller.audioStatus).font(.callout.weight(.medium))
-            Spacer()
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                Image(systemName: controller.audioStatus == "silent" ? "speaker.slash" : "speaker.wave.2")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20)
+                Text(controller.audioStatus).font(.callout.weight(.medium))
+                Spacer()
+            }
+            if let issue = controller.audioIssue {
+                Label(issue, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange).font(.caption)
+            }
         }
     }
 
@@ -179,7 +185,7 @@ struct PreferencesPane: View {
                 Card(title: "Privacy") {
                     Toggle("Share anonymous usage data", isOn: $diagnosticsOptIn)
                         .onChange(of: diagnosticsOptIn) { _, v in DiagnosticsPreference.isEnabled = v }
-                    Text("A coarse summary only: session count, days used, workspace count, switches, and total active time. Never workspace names, app names, or file paths. Local usage tracking (Usage tab) always runs regardless of this setting.")
+                    Text("A coarse summary only: session count, days used, workspace count, switches, and total active time. Never workspace names, app names, or file paths. Local usage tracking (Usage tab) always runs regardless of this setting. There's no server to send it to yet, so this toggle doesn't transmit anything today — it just records your preference for when that exists.")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
                 Card(title: "Configuration") {
@@ -310,35 +316,3 @@ struct AboutPane: View {
     }
 }
 
-// MARK: - Placeholder for not-yet-built panes
-
-struct PlaceholderPane: View {
-    let pane: Pane
-    var body: some View {
-        VStack(spacing: 12) {
-            Image(systemName: pane.systemImage).font(.system(size: 38)).foregroundStyle(.secondary)
-            Text(pane.rawValue).font(.title2.weight(.semibold))
-            if let m = pane.milestone {
-                Text("Coming in \(m)")
-                    .font(.callout).foregroundStyle(.secondary)
-                    .padding(.horizontal, 12).padding(.vertical, 5)
-                    .background(.quaternary.opacity(0.5), in: Capsule())
-            }
-            Text(blurb).font(.callout).foregroundStyle(.secondary)
-                .multilineTextAlignment(.center).frame(maxWidth: 420)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .navigationTitle(pane.rawValue)
-    }
-
-    private var blurb: String {
-        switch pane {
-        case .workspaces: return "Create workspaces, drag apps in, set the sound, tune fades and per-app overrides."
-        case .soundLibrary: return "Connect Spotify / Apple Music, add your own files, and the bundled ambient starter set."
-        case .precedence: return "Order the tiebreak chain, pick the fallback, and simulate conflicts before they happen."
-        case .triggers: return "Toggle sensors, define what counts as a meeting, and name your Spaces."
-        case .advanced: return "Two-way YAML editor, import/export, logs, and the rule inspector."
-        default: return ""
-        }
-    }
-}

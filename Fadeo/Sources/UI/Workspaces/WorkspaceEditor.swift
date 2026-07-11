@@ -56,6 +56,13 @@ struct WorkspaceEditor: View {
     private var matchCard: some View {
         Card(title: "Match: when this workspace activates") {
             VStack(alignment: .leading, spacing: 14) {
+                if workspace.match.isEmpty {
+                    Label(
+                        "No conditions set. This workspace never activates until you add an app, Space, or other condition.",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .font(.caption).foregroundStyle(.orange)
+                }
                 appsSection
                 Divider()
                 spacesSection
@@ -74,18 +81,18 @@ struct WorkspaceEditor: View {
     private var appsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Apps").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            ForEach(workspace.match.apps.indices, id: \.self) { i in
+            ForEach(workspace.match.apps, id: \.bundle) { entry in
                 HStack {
-                    Image(nsImage: appIcon(workspace.match.apps[i].bundle))
+                    Image(nsImage: appIcon(entry.bundle))
                         .resizable().frame(width: 18, height: 18)
-                    Text(appName(workspace.match.apps[i].bundle))
+                    Text(appName(entry.bundle))
                     Spacer()
-                    Picker("", selection: $workspace.match.apps[i].strength) {
+                    Picker("", selection: strengthBinding(entry.bundle)) {
                         Text("Strong").tag(MembershipStrength.strong)
                         Text("Weak").tag(MembershipStrength.weak)
                     }
                     .labelsHidden().frame(width: 100)
-                    Button { workspace.match.apps.remove(at: i) } label: {
+                    Button { workspace.match.apps.removeAll { $0.bundle == entry.bundle } } label: {
                         Image(systemName: "xmark.circle.fill")
                     }.buttonStyle(.plain).foregroundStyle(.secondary)
                 }
@@ -109,17 +116,23 @@ struct WorkspaceEditor: View {
             Text("Desktop / Space").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
             HStack {
                 ForEach(workspace.match.spaces, id: \.self) { s in
-                    Text("Desktop \(s)")
-                        .font(.caption).padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(.quaternary, in: Capsule())
-                        .onTapGesture { workspace.match.spaces.removeAll { $0 == s } }
+                    HStack(spacing: 4) {
+                        Text("Desktop \(s)")
+                        Image(systemName: "xmark").font(.system(size: 7))
+                    }
+                    .font(.caption).padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(.quaternary, in: Capsule())
+                    .onTapGesture { workspace.match.spaces.removeAll { $0 == s } }
                 }
-                Stepper("Add space", value: Binding(
-                    get: { 0 }, set: { if $0 > 0 && !workspace.match.spaces.contains($0) { workspace.match.spaces.append($0) } }
-                ), in: 0...20).labelsHidden()
-                Button("Add") {
-                    let next = (workspace.match.spaces.max() ?? 0) + 1
-                    workspace.match.spaces.append(next)
+                Menu("Add desktop") {
+                    ForEach(1...16, id: \.self) { n in
+                        Button("Desktop \(n)") {
+                            if !workspace.match.spaces.contains(n) {
+                                workspace.match.spaces.append(n)
+                                workspace.match.spaces.sort()
+                            }
+                        }.disabled(workspace.match.spaces.contains(n))
+                    }
                 }.font(.caption)
             }
             Text("Tap a chip to remove it. Leave empty to ignore Space.").font(.caption2).foregroundStyle(.tertiary)
@@ -253,6 +266,17 @@ struct WorkspaceEditor: View {
     private func addApp(_ bundle: String) {
         guard !workspace.match.apps.contains(where: { $0.bundle == bundle }) else { return }
         workspace.match.apps.append(AppMembership(bundle: bundle, strength: .strong))
+    }
+
+    private func strengthBinding(_ bundle: String) -> Binding<MembershipStrength> {
+        Binding(
+            get: { workspace.match.apps.first(where: { $0.bundle == bundle })?.strength ?? .strong },
+            set: { newValue in
+                if let idx = workspace.match.apps.firstIndex(where: { $0.bundle == bundle }) {
+                    workspace.match.apps[idx].strength = newValue
+                }
+            }
+        )
     }
 
     private func weekdayLabel(_ d: Int) -> String {

@@ -66,7 +66,7 @@ struct OnboardingSheet: View {
     }
 
     private var privacyExplanation: String {
-        "Fadeo always tracks your own usage locally so you can see it (Usage tab). If you turn this on, a coarse summary can be shared: session count, days used, number of workspaces, total switches, and total active time. Never workspace or app names, file paths, or anything else on your Mac. Change this anytime in Preferences."
+        "Fadeo always tracks your own usage locally so you can see it (Usage tab). This toggle only prepares a coarse summary for future sharing (session count, days used, number of workspaces, total switches, total active time, never workspace or app names, file paths, or anything else on your Mac) — there's no server to send it to yet, so turning this on doesn't transmit anything today. Change this anytime in Preferences."
     }
 
     private func permissionRow(icon: String, title: String, detail: String) -> some View {

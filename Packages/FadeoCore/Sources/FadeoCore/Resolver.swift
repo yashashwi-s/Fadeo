@@ -9,16 +9,23 @@ public struct AudioTarget: Sendable, Equatable {
     /// Only meaningful for multi-file internal sources (folder/playlist).
     public var order: PlaybackOrder
     public var repeatMode: RepeatMode
+    /// True only for a transient "nothing matches right now" fallback (Band 4): tells the
+    /// Reconciler to hold the session open in a resumable pause rather than fully
+    /// tearing down, since the same workspace reappearing a moment later (a menu-bar
+    /// click, a glance at Mission Control, briefly tabbing away) should resume in place,
+    /// not restart. Never set by a workspace's own configured sound action.
+    public var resumable: Bool
 
     public init(
         source: String? = nil, action: SoundAction = .doNothing, volume: Double = 1.0,
-        order: PlaybackOrder = .sequential, repeatMode: RepeatMode = .all
+        order: PlaybackOrder = .sequential, repeatMode: RepeatMode = .all, resumable: Bool = false
     ) {
         self.source = source
         self.action = action
         self.volume = volume
         self.order = order
         self.repeatMode = repeatMode
+        self.resumable = resumable
     }
 }
 
@@ -87,10 +94,14 @@ public struct Resolver {
 
         // ---- Band 1: override (pre-emptive) ----
         let overrides = enabled.filter { $0.isOverride && test($0, context, config.settings).matched }
-        if let win = pickHighest(overrides, chain: config.settings.normalizedTiebreak, context: context, state: state) {
+        if !overrides.isEmpty {
+            let (win, strat) = pick(overrides, chain: config.settings.normalizedTiebreak, context: context, config: config, state: state)
             return decide(win, context: context, config: config, band: .override,
-                          deciding: nil, candidates: overrides.map(\.id), weakOnly: [],
-                          explanation: "‘\(win.name)’ pre-empts as an override (\(matchSummary(win, context, config.settings))).")
+                          deciding: overrides.count == 1 ? nil : strat,
+                          candidates: overrides.map(\.id), weakOnly: [],
+                          explanation: overrides.count == 1
+                            ? "‘\(win.name)’ pre-empts as an override (\(matchSummary(win, context, config.settings)))."
+                            : "‘\(win.name)’ pre-empts as an override, won by \(strat?.rawValue ?? "order") over \(others(overrides, win)).")
         }
 
         // ---- Band 2/3: candidates ----
@@ -128,7 +139,8 @@ public struct Resolver {
         // A `weak` match means "don't disrupt": preserve the current workspace and
         // suppress the fallback. Weak matches never *start* audio on their own.
         if !weak.isEmpty {
-            if let cur = state.activeWorkspace, let curWS = config.workspaces.first(where: { $0.id == cur }) {
+            if let cur = state.activeWorkspace,
+               let curWS = config.workspaces.first(where: { $0.id == cur && $0.enabled }) {
                 return decide(curWS, context: context, config: config, band: .fallback,
                               deciding: nil, candidates: [], weakOnly: weak.map(\.id),
                               explanation: "kept ‘\(curWS.name)’ — only weak matches (\(weak.map(\.name).joined(separator: ", "))) present.")
@@ -154,9 +166,18 @@ public struct Resolver {
 
         if !m.apps.isEmpty {
             present += 1
-            if let app = ctx.frontmostApp, let entry = m.apps.first(where: { $0.bundle == app }) {
-                matched += 1
-                if entry.strength == .weak { appMatchedWeak = true } else { appMatchedStrong = true }
+            if let app = ctx.frontmostApp {
+                let entries = m.apps.filter { $0.bundle == app }
+                if !entries.isEmpty {
+                    matched += 1
+                    // A bundle listed twice (once weak, once strong) should activate: the
+                    // strong entry wins rather than whichever happened to be listed first.
+                    if entries.contains(where: { $0.strength == .strong }) {
+                        appMatchedStrong = true
+                    } else {
+                        appMatchedWeak = true
+                    }
+                }
             }
         }
         if !m.spaces.isEmpty {
@@ -181,8 +202,10 @@ public struct Resolver {
             if m.weekdays.contains(wd) { matched += 1; nonAppMatched = true }
         }
 
-        // Empty match = catch-all.
-        if present == 0 { return MatchResult(matched: true, strong: true, specificity: 0) }
+        // A match with no conditions never activates: candidacy requires at least one
+        // matched dimension (PLAN.md §5). A freshly created workspace must stay inert
+        // until the user gives it a condition.
+        if present == 0 { return MatchResult(matched: false, strong: false, specificity: 0) }
 
         let didMatch = (m.combine == .all) ? (matched == present) : (matched > 0)
         // "strong" unless the *only* thing that got us in was a weak app.
@@ -212,8 +235,14 @@ public struct Resolver {
                 let narrowed = pool.filter { $0.priority == best }
                 if narrowed.count < pool.count { pool = narrowed; if pool.count == 1 { return (pool[0], .priority) } }
             case .recency:
-                let narrowed = pool.max { (state.lastActive[$0.id] ?? .distantPast) < (state.lastActive[$1.id] ?? .distantPast) }
-                if let n = narrowed { return (n, .recency) }
+                let dates = pool.map { state.lastActive[$0.id] ?? .distantPast }
+                // All candidates equally (usually never-)active: recency has no signal to
+                // offer here, so fall through to the next strategy instead of picking
+                // whichever happened to be first in the array and mislabeling it "recency".
+                guard let first = dates.first, !dates.allSatisfy({ $0 == first }) else { continue }
+                if let n = pool.max(by: { (state.lastActive[$0.id] ?? .distantPast) < (state.lastActive[$1.id] ?? .distantPast) }) {
+                    return (n, .recency)
+                }
             case .stableId:
                 if let n = pool.min(by: { $0.id < $1.id }) { return (n, .stableId) }
             }
@@ -221,15 +250,6 @@ public struct Resolver {
         // Deterministic safety net.
         let win = pool.min(by: { $0.id < $1.id }) ?? candidates[0]
         return (win, pool.count == candidates.count ? nil : .stableId)
-    }
-
-    private func pickHighest(_ list: [Workspace], chain: [TiebreakStrategy], context: Context, state: ResolverState) -> Workspace? {
-        guard !list.isEmpty else { return nil }
-        // Overrides resolve by priority desc, then stable id.
-        return list.max { a, b in
-            if a.priority != b.priority { return a.priority < b.priority }
-            return a.id > b.id
-        }
     }
 
     // MARK: Decision building
@@ -278,9 +298,12 @@ public struct Resolver {
                             transition: Transition(timing: fadeTiming),
                             reason: trace(nil, "no workspace matches — resuming previous."))
         case .silence, .keepCurrent, .resumePrevious:
-            // silence, or the forceKeepNil (nothing active) path.
+            // silence, or the forceKeepNil (nothing active) path. Marked resumable: this
+            // is exactly the "nothing matches right now" transient state — a menu-bar
+            // click, Mission Control, briefly tabbing away — where reappearing on the
+            // same workspace a moment later should resume in place, not restart.
             return Decision(activeWorkspace: nil,
-                            target: AudioTarget(action: .stop, volume: 0),
+                            target: AudioTarget(action: .stop, volume: 0, resumable: true),
                             transition: Transition(timing: fadeTiming),
                             reason: trace(nil, note ?? "no workspace matches — fading to silence."))
         }

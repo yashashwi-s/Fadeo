@@ -51,6 +51,11 @@ final class InternalEngine {
 
     private(set) var state: AudioState = .silent
 
+    enum EndReason { case finished, failed(String) }
+    /// Fired on main whenever playback ends on its own (not via a stop/crossfade command):
+    /// a failed start, an unplayable queue, or a repeat-off queue running out.
+    var onPlaybackEnded: ((EndReason) -> Void)?
+
     // Includes movie containers (mp4/m4v/mov): AVAudioFile reads their audio track fine,
     // verified against ground truth, so folders of screen recordings or music videos
     // play their audio.
@@ -79,6 +84,10 @@ final class InternalEngine {
             crossfade(to: source, volume: volume, ms: ms)
         case .setVolume(let volume, let ms):
             setVolume(volume, ms: ms)
+        case .pause(let fadeMs):
+            pause(fadeMs: fadeMs)
+        case .resume(let volume, let fadeMs):
+            resume(volume: volume, fadeMs: fadeMs)
         case .stop(let fadeMs):
             stop(fadeMs: fadeMs)
         }
@@ -102,11 +111,16 @@ final class InternalEngine {
 
         case .files:
             silenceNoiseImmediate()
+            // Clear any lingering scheduled buffer from a previous paused session (e.g. a
+            // different source starting while the last one was merely paused, not
+            // stopped) — scheduling a new file on a node that still holds an old paused
+            // schedule can double up playback.
+            playerNode?.stop()
             let urls = resolveQueue(source)
             guard !urls.isEmpty else {
                 NSLog("Fadeo InternalEngine: no playable files for source \(source)")
-                activeKind = nil
-                state = .silent
+                teardownAfterEnd()
+                onPlaybackEnded?(.failed("no playable files in \(source)"))
                 return
             }
             queue = order == .shuffle ? urls.shuffled() : urls
@@ -175,6 +189,65 @@ final class InternalEngine {
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(max(0, fadeMs)), execute: work)
     }
 
+    /// Ramp to silence but hold everything open: unlike `stop()`, the engine is not torn
+    /// down, `queueIndex` is untouched, and the file player node is *paused* (not
+    /// stopped), so `resume()` can continue from the exact position instead of restarting
+    /// the queue from the first file. Used for transient "nothing matches right now"
+    /// moments (see `AudioTarget.resumable`), never for a deliberate stop/pause action.
+    private func pause(fadeMs: Int) {
+        pendingWork?.cancel()
+        guard activeKind != nil else { return }
+        switch activeKind {
+        case .preset: renderer.setRamp(to: 0, ms: fadeMs, sampleRate: sampleRate)
+        case .files:  rampFileVolume(to: 0, ms: fadeMs)
+        case nil:     break
+        }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            if case .files = self.activeKind { self.playerNode?.pause() }
+            self.state.playing = false
+            self.state.paused = true
+        }
+        pendingWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(max(0, fadeMs)), execute: work)
+    }
+
+    /// Ramp back up in place from a `pause()` — never re-resolves the queue or re-opens
+    /// the file, so playback continues from exactly where it paused.
+    private func resume(volume: Double, fadeMs: Int) {
+        pendingWork?.cancel()
+        guard state.paused, activeKind != nil else {
+            // Nothing held open to resume (e.g. the bounded hard-teardown timer upstream
+            // already tore this down) — fall back to a fresh start of the same source.
+            if let source = state.source { start(source: source, volume: volume, fadeMs: fadeMs) }
+            return
+        }
+        switch activeKind {
+        case .preset:
+            startEngineIfNeeded()
+            renderer.setRamp(to: calibratedGain(volume, source: state.source ?? ""), ms: fadeMs, sampleRate: sampleRate)
+        case .files:
+            startEngineIfNeeded()
+            playerNode?.play()
+            rampFileVolume(to: Float(volume), ms: fadeMs)
+        case nil:
+            break
+        }
+        state = AudioState(source: state.source, volume: volume, playing: true)
+    }
+
+    /// Immediate full teardown after playback ended on its own; releases the audio HAL so
+    /// idle cost returns to ~0 (same contract as stop()).
+    private func teardownAfterEnd() {
+        fadeTimer?.cancel(); fadeTimer = nil
+        playbackGeneration += 1
+        playerNode?.stop()
+        fileMixer.outputVolume = 0
+        if engine.isRunning { engine.stop() }
+        activeKind = nil
+        state = .silent
+    }
+
     // MARK: File queue playback
 
     /// `attemptsLeft` bounds how many consecutive unplayable files we'll skip before
@@ -217,14 +290,32 @@ final class InternalEngine {
     private func advancePastUnplayable(attemptsLeft: Int) {
         guard !queue.isEmpty, attemptsLeft > 0 else {
             NSLog("Fadeo InternalEngine: no playable files in the source, going silent")
-            playerNode?.stop()
-            fileMixer.outputVolume = 0
-            activeKind = nil
-            state = .silent
+            teardownAfterEnd()
+            onPlaybackEnded?(.failed("no playable files"))
             return
         }
         queueIndex = (queueIndex + 1) % queue.count
         playCurrentQueueItem(fadeInMs: 0, attemptsLeft: attemptsLeft)
+    }
+
+    /// Manual "skip forward" (menu bar control) — advances immediately, distinct from
+    /// `handleTrackFinished`'s natural-completion path (no generation check needed since
+    /// this call itself defines the new current generation).
+    func skipToNext() {
+        guard activeKind == .files, !queue.isEmpty else { return }
+        playbackGeneration += 1
+        switch repeatMode {
+        case .one, .all:
+            queueIndex = (queueIndex + 1) % queue.count
+        case .off:
+            queueIndex += 1
+            guard queue.indices.contains(queueIndex) else {
+                teardownAfterEnd()
+                onPlaybackEnded?(.finished)
+                return
+            }
+        }
+        playCurrentQueueItem(fadeInMs: 300)
     }
 
     private func handleTrackFinished(generation: Int) {
@@ -240,8 +331,8 @@ final class InternalEngine {
         case .off:
             queueIndex += 1
             guard queue.indices.contains(queueIndex) else {
-                activeKind = nil
-                state = .silent
+                teardownAfterEnd()
+                onPlaybackEnded?(.finished)
                 return
             }
         }

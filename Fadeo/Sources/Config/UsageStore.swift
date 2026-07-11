@@ -50,6 +50,16 @@ final class UsageStore: ObservableObject {
         }
     }
 
+    /// Drops usage rows for workspace ids that no longer exist in config, so a renamed or
+    /// deleted workspace doesn't leave a stale row behind forever.
+    func prune(keeping ids: Set<String>) {
+        let before = stats.perWorkspace.count
+        stats.perWorkspace = stats.perWorkspace.filter { ids.contains($0.key) }
+        guard stats.perWorkspace.count != before else { return }
+        dirty = true
+        scheduleSave()
+    }
+
     func flush() {
         saveTimer?.invalidate()
         saveTimer = nil

@@ -7,14 +7,17 @@ struct MenuBarContent: View {
     @EnvironmentObject var controller: AppController
     @Environment(\.openWindow) private var openWindow
 
-    private var activeWorkspace: Workspace? {
-        controller.configStore.config.workspaces.first { $0.id == controller.decision?.activeWorkspace }
-    }
+    private var activeWorkspace: Workspace? { controller.activeWorkspaceForDisplay }
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
+
+            if controller.canControlPlayback {
+                playbackRow.padding(.vertical, 4)
+                Divider()
+            }
 
             pauseRow.padding(.vertical, 4)
 
@@ -68,6 +71,33 @@ struct MenuBarContent: View {
         .padding(.horizontal, 13)
         .padding(.top, 12)
         .padding(.bottom, 11)
+    }
+
+    private var playbackRow: some View {
+        HStack(spacing: 18) {
+            Spacer()
+            Button {
+                controller.togglePlayPause()
+            } label: {
+                Image(systemName: controller.isAudioPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 15))
+            }
+            .buttonStyle(.plain)
+            .help(controller.isAudioPlaying ? "Pause" : "Play")
+
+            Button {
+                controller.skipNext()
+            } label: {
+                Image(systemName: "forward.fill")
+                    .font(.system(size: 13))
+            }
+            .buttonStyle(.plain)
+            .help("Skip")
+            Spacer()
+        }
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 13)
+        .padding(.vertical, 2)
     }
 
     private var pauseRow: some View {

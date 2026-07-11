@@ -66,12 +66,20 @@ actuators are otherwise stateless with respect to each other.
 codebase:
 
 1. **Override** — any `Workspace.isOverride` workspace whose `match` holds pre-empts
-   everything (e.g. "Meetings" pauses audio unconditionally).
+   everything (e.g. "Meetings" pauses audio unconditionally). Overrides use their own
+   `sound` like any other workspace — an override with `action: play` really does play;
+   nothing hardcodes overrides to pause/silence, so a misconfigured override (e.g. no
+   `meeting` condition, just an app) will pre-empt on that condition alone.
 2. **Candidates** — every enabled, non-override workspace whose `match` currently holds.
+   A match with zero conditions of any kind (`Match.isEmpty`) never holds — it's inert, not
+   a catch-all, so a freshly created workspace stays silent until you give it a condition.
 3. **Tiebreak chain** — when there are multiple candidates, `Settings.tiebreak` (default
-   `[stickiness, specificity, priority, recency, stableId]`) narrows to one winner.
-   `stickiness` means: if the currently-active workspace is still a candidate, keep it —
-   this is what stops the audio from changing just because you tabbed through a shared app.
+   `[stickiness, specificity, priority, stableId]`) narrows to one winner. `stickiness`
+   means: if the currently-active workspace is still a candidate, keep it — this is what
+   stops the audio from changing just because you tabbed through a shared app. `recency` is
+   available but opt-in (off by default, PLAN.md §5) — it falls through to the next
+   strategy when every candidate is equally cold, rather than picking config order and
+   mislabeling it "recency".
 4. **Fallback** — no candidate matched; governed by `Settings.fallback`
    (`keepCurrent` / `resumePrevious` / `silence`).
 
@@ -184,7 +192,15 @@ independent playback path (`AVAudioPlayerNode` + a dedicated mixer) for real fil
 `internal:file:`/`internal:folder:`/`internal:playlist:` sources — queued per the
 workspace's `order`/`repeatMode`. The two paths are mutually exclusive (only one plays at
 a time) and both fully torn down (`stop()`/`playerNode?.stop()`, not just gain-zeroed)
-when idle. `ExternalConductor` (`Fadeo/Sources/Actuators/`) conducts Spotify/Apple Music
+when idle. Playback that ends on its own — a failed/empty/unplayable source, or a
+repeat-off queue running out — reports back through `InternalEngine.onPlaybackEnded`
+rather than leaving `AppController.audioState` stale: the engine tears itself down the same
+way `stop()` does (so idle cost still drops to ~0) and `AppController` updates `audioState`
+(`finished: true` for a natural end, so `Reconciler` won't restart a completed play-once
+queue on the next context tick) and `audioIssue` (surfaced in the Now pane) for a failure.
+Never let `audioState` claim `playing: true` after the engine has actually stopped —
+that desync is what silently breaks the "why is nothing playing" story. `ExternalConductor`
+(`Fadeo/Sources/Actuators/`) conducts Spotify/Apple Music
 instead of playing anything itself: generic transport via `Platform/MediaRemoteBridge.swift`
 (dlopen/dlsym against the private MediaRemote framework — works without entitlement for
 *commands*, unlike reading now-playing state which macOS 15.4+ locked down), and

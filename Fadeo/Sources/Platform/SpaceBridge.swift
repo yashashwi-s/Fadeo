@@ -25,9 +25,24 @@ enum SpaceBridge {
 
     static var isAvailable: Bool { mainConnectionID != nil && copyManagedDisplaySpaces != nil }
 
+    /// Logged at most once per launch: repeated NSLog spam would just be noise once the
+    /// private shape has changed (every subsequent call would hit the same nil path).
+    private static var didLogFailure = false
+
     /// The 1-based index of the currently active Space on the main display, or `nil` if
     /// the private API is unavailable or its shape has changed on this macOS version.
     static func currentSpaceIndex() -> Int? {
+        guard let index = uncachedCurrentSpaceIndex() else {
+            if !didLogFailure {
+                didLogFailure = true
+                NSLog("Fadeo SpaceBridge: could not read current Space (private CGS shape changed?)")
+            }
+            return nil
+        }
+        return index
+    }
+
+    private static func uncachedCurrentSpaceIndex() -> Int? {
         guard let mainConnectionID, let copyManagedDisplaySpaces else { return nil }
         let cid = mainConnectionID()
         guard let displays = copyManagedDisplaySpaces(cid)?.takeRetainedValue() as? [[String: Any]] else {
@@ -43,7 +58,15 @@ enum SpaceBridge {
               let currentID = current["id64"] as? Int64 ?? (current["ManagedSpaceID"] as? NSNumber)?.int64Value
         else { return nil }
 
-        for (i, space) in spaces.enumerated() {
+        // Real desktops report `type == 0`. Fullscreen/tiled-app spaces report `type == 4`
+        // (verified live: they carry TileLayoutManager/WallSpace/fs_wid keys instead of a
+        // Display Identifier) and must be excluded, or their presence in the raw array can
+        // shift the 1-based index away from what Mission Control shows as "Desktop N".
+        // Entries missing the `type` key entirely are kept, for compatibility with any CGS
+        // shape where it's absent.
+        let userSpaces = spaces.filter { ($0["type"] as? Int ?? 0) == 0 }
+
+        for (i, space) in userSpaces.enumerated() {
             let id = space["id64"] as? Int64 ?? (space["ManagedSpaceID"] as? NSNumber)?.int64Value
             if id == currentID { return i + 1 }
         }
