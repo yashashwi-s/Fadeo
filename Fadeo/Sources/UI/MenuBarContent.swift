@@ -92,6 +92,7 @@ struct MenuBarContent: View {
                     .font(.system(size: 13))
             }
             .buttonStyle(.plain)
+            .disabled(!controller.isAudioPlaying)
             .help("Skip")
             Spacer()
         }

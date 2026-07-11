@@ -41,7 +41,9 @@ struct OnboardingSheet: View {
             Divider().padding(.vertical, 20)
 
             Toggle("Launch Fadeo at login", isOn: $launchAtLogin)
-                .onChange(of: launchAtLogin) { _, v in LoginItem.setEnabled(v) }
+                .onChange(of: launchAtLogin) { _, v in
+                    if !LoginItem.setEnabled(v) { launchAtLogin = LoginItem.isEnabled }
+                }
                 .padding(.horizontal, 32)
 
             VStack(alignment: .leading, spacing: 6) {

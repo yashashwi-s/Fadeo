@@ -62,11 +62,32 @@ final class ConfigStore: ObservableObject {
         }
     }
 
-    /// Persist an in-memory edit (from the GUI) back to disk atomically.
+    /// Persist an in-memory edit (from the GUI) back to disk atomically. Regenerates the
+    /// whole file from `newConfig`, which drops any hand-added comments — see `saveRaw`
+    /// for the one path that doesn't.
     func save(_ newConfig: Config) {
         config = newConfig
         do {
             let data = try ConfigCodec.encode(newConfig)
+            lastWrittenData = data
+            try data.write(to: AppPaths.configFile, options: .atomic)
+            lastError = nil
+        } catch {
+            lastError = "Could not save config: \(error.localizedDescription)"
+        }
+    }
+
+    /// Persist the Advanced pane's raw YAML text exactly as typed, comments and all —
+    /// unlike `save(_:)`, this never re-encodes through `Config`, so a hand-written
+    /// comment actually survives this save. `decoded` (already parsed by the caller, so a
+    /// bad edit is reported before ever reaching here) becomes the new in-memory config.
+    func saveRaw(text: String, decoded: Config) {
+        config = decoded
+        guard let data = text.data(using: .utf8) else {
+            lastError = "Could not save config: text isn't valid UTF-8."
+            return
+        }
+        do {
             lastWrittenData = data
             try data.write(to: AppPaths.configFile, options: .atomic)
             lastError = nil

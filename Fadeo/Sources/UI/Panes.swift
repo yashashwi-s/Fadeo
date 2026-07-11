@@ -160,7 +160,7 @@ struct NowPane: View {
         case .pause: return "would pause"
         case .stop: return "would stop"
         case .setVolume: return "would set volume"
-        case .duck: return "would duck"
+        case .duck: return controller.isAudioPlaying ? "would duck" : "no change (nothing playing)"
         case .resumePrevious: return "would resume previous"
         case .doNothing: return "no change"
         }
@@ -179,7 +179,9 @@ struct PreferencesPane: View {
             VStack(alignment: .leading, spacing: 16) {
                 Card(title: "General") {
                     Toggle("Launch Fadeo at login", isOn: $launchAtLogin)
-                        .onChange(of: launchAtLogin) { _, v in LoginItem.setEnabled(v) }
+                        .onChange(of: launchAtLogin) { _, v in
+                            if !LoginItem.setEnabled(v) { launchAtLogin = LoginItem.isEnabled }
+                        }
                     Toggle("Pause automation", isOn: $controller.automationPaused)
                 }
                 Card(title: "Privacy") {

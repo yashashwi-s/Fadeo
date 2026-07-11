@@ -23,8 +23,12 @@ final class FocusSensor: Sensor {
     private static let assertionsFile = dbDirectory.appendingPathComponent("Assertions.json")
 
     private var watcher: FileWatcher?
+    /// Assertions.json can be rewritten by the system without the active mode actually
+    /// changing; dedupe so a spurious FSEvent doesn't force an extra re-evaluation.
+    private var lastEmitted: String??
 
     func start(emit: @escaping (ContextPatch) -> Void) {
+        lastEmitted = nil
         emitCurrent(emit)
         watcher = FileWatcher(directory: Self.dbDirectory) { [weak self] in
             Task { @MainActor in self?.emitCurrent(emit) }
@@ -35,10 +39,13 @@ final class FocusSensor: Sensor {
     func stop() {
         watcher?.stop()
         watcher = nil
+        lastEmitted = nil
     }
 
     private func emitCurrent(_ emit: @escaping (ContextPatch) -> Void) {
         let mode = Self.readActiveModeIdentifier()
+        if let last = lastEmitted, last == mode { return }
+        lastEmitted = mode
         emit(ContextPatch(apply: { $0.focusMode = mode }, label: "focus → \(mode ?? "none")"))
     }
 

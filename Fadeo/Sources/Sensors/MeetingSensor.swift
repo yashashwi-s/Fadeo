@@ -15,6 +15,10 @@ final class MeetingSensor: Sensor {
     private var cameraListeners: [(CMIOObjectID, CMIOObjectPropertyListenerBlock)] = []
     private var micListeners: [(AudioObjectID, AudioObjectPropertyListenerBlock)] = []
     private var emit: ((ContextPatch) -> Void)?
+    /// CoreAudio/CoreMediaIO listener blocks can over-fire (a property-changed
+    /// notification with no actual change); dedupe so a spurious fire doesn't force an
+    /// extra context re-evaluation for no reason.
+    private var lastEmitted: (camera: Bool, mic: Bool)?
 
     func start(emit: @escaping (ContextPatch) -> Void) {
         self.emit = emit
@@ -36,6 +40,7 @@ final class MeetingSensor: Sensor {
         }
         micListeners.removeAll()
         emit = nil
+        lastEmitted = nil
     }
 
     deinit {
@@ -151,6 +156,8 @@ final class MeetingSensor: Sensor {
     private func emitCurrent() {
         let camera = anyCameraRunning()
         let mic = anyMicRunning()
+        if let last = lastEmitted, last.camera == camera, last.mic == mic { return }
+        lastEmitted = (camera, mic)
         emit?(ContextPatch(
             apply: {
                 $0.cameraActive = camera

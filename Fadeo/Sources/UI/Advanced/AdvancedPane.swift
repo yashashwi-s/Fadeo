@@ -64,7 +64,7 @@ struct AdvancedPane: View {
     private func save() {
         do {
             let cfg = try ConfigCodec.decode(string: text)
-            controller.configStore.save(cfg)
+            controller.configStore.saveRaw(text: text, decoded: cfg)
             localError = nil
             savedFlash = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { savedFlash = false }

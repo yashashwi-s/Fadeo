@@ -35,13 +35,25 @@ final class ReconcilerTests: XCTestCase {
         XCTAssertEqual(c, .setVolume(0.9, ms: 800))
     }
 
-    func testStopWhenPausing() {
+    func testPauseActionIsResumable() {
         let cur = AudioState(source: "internal:preset:brown-noise", volume: 0.6, playing: true)
-        XCTAssertEqual(r.reconcile(current: cur, target: target(.pause), transition: timing), .stop(fadeMs: 600))
+        XCTAssertEqual(r.reconcile(current: cur, target: target(.pause), transition: timing), .pause(fadeMs: 600),
+                       "a workspace's own Pause action must be resumable, distinct from Stop")
+    }
+
+    func testStopActionIsHardStop() {
+        let cur = AudioState(source: "internal:preset:brown-noise", volume: 0.6, playing: true)
+        XCTAssertEqual(r.reconcile(current: cur, target: target(.stop), transition: timing), .stop(fadeMs: 600))
     }
 
     func testStopWhenAlreadySilentIsNoOp() {
         XCTAssertEqual(r.reconcile(current: .silent, target: target(.stop), transition: timing), .none)
+    }
+
+    func testDeliberateStopForcesTeardownFromAlreadyPausedState() {
+        let cur = AudioState(source: "internal:preset:brown-noise", volume: 0.6, playing: false, paused: true)
+        let c = r.reconcile(current: cur, target: target(.stop), transition: timing)
+        XCTAssertEqual(c, .stop(fadeMs: 600), "a deliberate stop must tear down even a merely-paused session, not leave it open")
     }
 
     func testDoNothingKeepsPlaying() {

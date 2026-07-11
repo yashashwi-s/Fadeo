@@ -299,19 +299,17 @@ final class AppController: ObservableObject {
 
     // MARK: Manual playback controls (menu bar)
 
-    /// Toggle a manual pause. Pausing holds the session open (same resumable mechanism
-    /// as a transient context fallback, see `AudioCommand.pause`) with no bounded
-    /// teardown — a deliberate pause stays paused until the user hits play again, however
-    /// long that takes. Resuming re-evaluates: normally that's the exact same source
-    /// continuing from where it paused, but if the context moved on while paused (a
-    /// different app now matches), the new workspace's own audio starts instead.
+    /// Toggle a manual pause/resume. Both directions act directly on whatever's currently
+    /// held (never via `evaluate()`): pausing while playing, or resuming while paused —
+    /// manually paused OR a transient context fallback alike, since from the button's
+    /// point of view both look identical (`audioState.playing == false`,
+    /// `audioState.paused == true`) and both deserve a working Play button. Resuming
+    /// cancels any bounded hard-teardown a transient fallback may have armed, and clears
+    /// `manuallyPaused` so normal automatic tracking resumes the next time the context
+    /// actually changes — it does not retroactively re-run the resolver right now.
     func togglePlayPause() {
-        guard !automationPaused, !isPreviewing else { return }
-        if manuallyPaused {
-            manuallyPaused = false
-            evaluate()
-        } else {
-            guard audioState.playing, activeActuator != .none else { return }
+        guard !automationPaused, !isPreviewing, activeActuator != .none else { return }
+        if audioState.playing {
             manuallyPaused = true
             cancelPendingSwitch()
             let command = AudioCommand.pause(fadeMs: configStore.config.settings.defaults.fadeOutMs)
@@ -322,6 +320,17 @@ final class AppController: ObservableObject {
             }
             audioState = AudioState(source: audioState.source, volume: audioState.volume, playing: false, paused: true)
             updateAudioStatus()
+        } else if audioState.paused {
+            manuallyPaused = false
+            cancelPausedTeardown()
+            let command = AudioCommand.resume(volume: audioState.volume, fadeMs: configStore.config.settings.defaults.fadeInMs)
+            switch activeActuator {
+            case .internalEngine: engine.execute(command)
+            case .external: external.execute(command)
+            case .none: return
+            }
+            audioState = AudioState(source: audioState.source, volume: audioState.volume, playing: true, paused: false)
+            updateAudioStatus()
         }
     }
 
@@ -329,6 +338,11 @@ final class AppController: ObservableObject {
     /// whatever external app holds Now Playing. A no-op for ambient noise presets (there
     /// is no "next" for a continuous synthesized texture) and while nothing is playing.
     func skipNext() {
+        // Skipping implies "keep playing" — while paused (manually or a transient
+        // context fallback), InternalEngine.skipToNext() would call playerNode.play()
+        // on the paused node and start audio again with no corresponding state update
+        // here, desyncing `audioState`/`manuallyPaused` from what's actually audible.
+        guard audioState.playing else { return }
         switch activeActuator {
         case .internalEngine: engine.skipToNext()
         case .external: external.next()
@@ -538,12 +552,18 @@ final class AppController: ObservableObject {
         }
         // A resumable pause holds the engine/session open — fine for a brief glance away,
         // but left unchecked it would violate the "torn down at idle" contract for a
-        // genuinely long absence. Arm a bounded hard-teardown; any other command (resumed,
-        // switched to something else, or a deliberate stop) cancels it.
-        if case .pause = command {
-            armPausedTeardown()
-        } else {
-            cancelPausedTeardown()
+        // genuinely long absence. Arm a bounded hard-teardown on entering pause; resuming,
+        // switching to something else, or a deliberate stop all cancel it. Crucially,
+        // `.none` must NOT cancel it: the fallback recurring while still paused (still no
+        // workspace matches) legitimately reconciles to `.none` (Reconciler already has
+        // nothing to change), and treating that as "cancel" would silently defeat the
+        // whole bound — every subsequent context tick during a long absence would keep
+        // resetting it to "not armed," holding the session open forever instead of the
+        // intended 120s cap.
+        switch command {
+        case .pause: armPausedTeardown()
+        case .none: break
+        default: cancelPausedTeardown()
         }
         updateAudioStatus()
     }

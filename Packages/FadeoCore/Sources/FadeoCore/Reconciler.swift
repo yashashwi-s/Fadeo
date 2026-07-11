@@ -54,12 +54,23 @@ public struct Reconciler {
             // the external conductor once wired; internally it's a no-op).
             return .none
 
-        case .pause, .stop:
+        case .pause:
+            // A workspace's own "Pause" is real and resumable now, distinct from "Stop" —
+            // reappearing on the same source (a meeting ending, leaving a Reading app)
+            // resumes exactly where it paused instead of restarting.
+            guard current.playing else { return .none }
+            return .pause(fadeMs: t.fadeOutMs)
+
+        case .stop:
+            // A deliberate stop must force a real teardown even from an already-paused
+            // (silent but still held open) state — otherwise a workspace explicitly
+            // configured to stop, arriving while something else is merely paused, would
+            // silently leave that session sitting open instead of tearing it down.
+            if current.paused, !target.resumable { return .stop(fadeMs: t.fadeOutMs) }
             guard current.playing else { return .none }
             // `target.resumable` is set only by a transient "nothing matches right now"
-            // fallback decision (Resolver), never by a workspace's own configured pause/
-            // stop action — those are deliberate steady states where a full teardown is
-            // correct and matches the efficiency contract.
+            // fallback decision (Resolver) that happens to use the `.stop` action — never
+            // by a workspace's own configured stop action, which is always a hard stop.
             return target.resumable ? .pause(fadeMs: t.fadeOutMs) : .stop(fadeMs: t.fadeOutMs)
 
         case .setVolume, .duck:
