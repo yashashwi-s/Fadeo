@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 import FadeoCore
 
 /// Builds/edits a `Sound.source` string by parsing it into a UI-friendly shape and
@@ -30,6 +31,16 @@ struct SoundEditor: View {
     /// as "Nothing", and the file row never appeared. Derived state needs this one bit
     /// of memory for the not-yet-configured case.
     @State private var pendingKind: Kind?
+
+    /// File/folder selection uses SwiftUI's declarative `.fileImporter`, driven by these
+    /// two flags, rather than presenting `NSOpenPanel` imperatively from the picker's
+    /// setter. The old approach opened the panel from a `DispatchQueue.main.async` inside
+    /// the Picker's `set`, which double-presented (the panel appeared twice, the first
+    /// pick not sticking) because a config-save re-render re-entered the setter mid-modal.
+    /// A `.fileImporter` bound to a Bool can't double-present — setting the flag true
+    /// twice is idempotent — and it never blocks the run loop.
+    @State private var showFileImporter = false
+    @State private var importingFolder = false
 
     private enum Kind: String, CaseIterable, Identifiable {
         case preset, file, folder, playlist, external, silence
@@ -92,6 +103,22 @@ struct SoundEditor: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Saved sounds appear in the library picker above and in Sound Library, so you never set this up twice.")
+        }
+        .fileImporter(
+            isPresented: $showFileImporter,
+            allowedContentTypes: importingFolder ? [.folder] : [.audio],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                if let url = urls.first {
+                    sound.source = (importingFolder ? "internal:folder:" : "internal:file:") + url.path
+                    sound.action = .play
+                }
+                pendingKind = nil   // the source now carries the kind (or the pick was empty)
+            case .failure:
+                pendingKind = nil   // cancelled/failed: fall back to the real current source
+            }
         }
     }
 
@@ -157,12 +184,13 @@ struct SoundEditor: View {
                     pendingKind = nil
                     sound.source = "internal:preset:\(Self.presets[0])"
                 case .file, .folder:
-                    // No source until a path is picked; remember the choice so the row
-                    // stays on File/Folder, and open the chooser right away — clicking
-                    // "A file" means "let me pick a file", not "show me a Choose button".
+                    // Remember the pick so the row shows File/Folder, and open the system
+                    // chooser right away — "A file" means "let me pick a file". The old
+                    // source is left intact until a pick actually commits, so cancelling
+                    // changes nothing. Declarative .fileImporter (see body) does the rest.
                     pendingKind = newKind
-                    sound.source = nil
-                    DispatchQueue.main.async { choosePath(isFolder: newKind == .folder) }
+                    importingFolder = (newKind == .folder)
+                    showFileImporter = true
                 case .playlist:
                     pendingKind = nil
                     sound.source = allPlaylists.first.map { "internal:playlist:\($0.id)" }
@@ -204,12 +232,16 @@ struct SoundEditor: View {
     // MARK: File / folder
 
     private func pathPicker(isFolder: Bool) -> some View {
-        HStack {
+        let hasPath = sourceSuffix(after: isFolder ? "internal:folder:" : "internal:file:") != nil
+        return HStack {
             Text(sourceSuffix(after: isFolder ? "internal:folder:" : "internal:file:").map { ($0 as NSString).abbreviatingWithTildeInPath } ?? "No \(isFolder ? "folder" : "file") chosen yet")
                 .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
             Spacer()
-            Button("Choose…") { choosePath(isFolder: isFolder) }
-            if onSaveSound != nil && sound.source != nil {
+            Button(hasPath ? "Change…" : "Choose…") {
+                importingFolder = isFolder
+                showFileImporter = true
+            }
+            if onSaveSound != nil && hasPath {
                 Button("Save…") {
                     savePromptName = ""
                     showSavePrompt = true
@@ -217,22 +249,6 @@ struct SoundEditor: View {
                 .help("Name this and keep it in your Sound Library for reuse in any workspace")
             }
         }
-    }
-
-    private func choosePath(isFolder: Bool) {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = !isFolder
-        panel.canChooseDirectories = isFolder
-        panel.allowsMultipleSelection = false
-        if !isFolder {
-            panel.allowedContentTypes = [.audio]
-        }
-        if panel.runModal() == .OK, let url = panel.url {
-            sound.source = (isFolder ? "internal:folder:" : "internal:file:") + url.path
-            pendingKind = nil   // the source now carries the kind
-        }
-        // Cancelled: keep pendingKind, so the row stays on File/Folder with its
-        // "No file chosen yet" state and a Choose… button instead of snapping away.
     }
 
     // MARK: Playlist

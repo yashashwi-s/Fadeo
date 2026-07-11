@@ -173,12 +173,17 @@ final class InternalEngine {
 
     // MARK: File queue playback
 
-    private func playCurrentQueueItem(fadeInMs: Int) {
+    /// `attemptsLeft` bounds how many consecutive unplayable files we'll skip before
+    /// giving up — without it, a queue where the current (or only) file can't be opened
+    /// recurses forever: `(i+1) % count` wraps back to the same bad file and retries
+    /// endlessly, overflowing the stack. Defaults to one full pass over the queue.
+    private func playCurrentQueueItem(fadeInMs: Int, attemptsLeft: Int? = nil) {
         guard let node = playerNode, queue.indices.contains(queueIndex) else { return }
+        let budget = attemptsLeft ?? queue.count
         let url = queue[queueIndex]
         guard let file = try? AVAudioFile(forReading: url) else {
             NSLog("Fadeo InternalEngine: could not open \(url.lastPathComponent), skipping")
-            advancePastUnplayable()
+            advancePastUnplayable(attemptsLeft: budget - 1)
             return
         }
         // AVAudioPlayerNode does NOT sample-rate-convert: the player→mixer connection
@@ -205,10 +210,17 @@ final class InternalEngine {
         rampFileVolume(to: Float(state.volume), ms: fadeInMs)
     }
 
-    private func advancePastUnplayable() {
-        guard !queue.isEmpty else { return }
+    private func advancePastUnplayable(attemptsLeft: Int) {
+        guard !queue.isEmpty, attemptsLeft > 0 else {
+            NSLog("Fadeo InternalEngine: no playable files in the source, going silent")
+            playerNode?.stop()
+            fileMixer.outputVolume = 0
+            activeKind = nil
+            state = .silent
+            return
+        }
         queueIndex = (queueIndex + 1) % queue.count
-        playCurrentQueueItem(fadeInMs: 0)
+        playCurrentQueueItem(fadeInMs: 0, attemptsLeft: attemptsLeft)
     }
 
     private func handleTrackFinished(generation: Int) {
