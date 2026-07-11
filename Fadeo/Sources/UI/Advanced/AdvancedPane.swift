@@ -54,9 +54,15 @@ struct AdvancedPane: View {
     }
 
     private func reload() {
-        if let data = try? ConfigCodec.encode(controller.configStore.config),
+        // Read the raw file, not a re-encode of the decoded Config model: re-encoding
+        // would already show a comment-free version the instant this pane opens, even
+        // before Save, since Config has nowhere to store a hand-written comment.
+        if let data = try? Data(contentsOf: AppPaths.configFile),
            let string = String(data: data, encoding: .utf8) {
             text = string
+        } else if let data = try? ConfigCodec.encode(controller.configStore.config),
+                  let string = String(data: data, encoding: .utf8) {
+            text = string   // fallback if the file itself is unreadable
         }
         localError = nil
     }
