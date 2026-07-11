@@ -118,7 +118,7 @@ final class ReconcilerTests: XCTestCase {
     func testPausedSameSourceResumesInPlace() {
         let cur = AudioState(source: "internal:folder:/x", volume: 0.6, playing: false, paused: true)
         let c = r.reconcile(current: cur, target: target(.play, "internal:folder:/x", 0.6), transition: timing)
-        XCTAssertEqual(c, .resume(volume: 0.6, fadeMs: 800), "same source reappearing after a pause must resume, not restart")
+        XCTAssertEqual(c, .resume(source: "internal:folder:/x", volume: 0.6, fadeMs: 800), "same source reappearing after a pause must resume, not restart")
     }
 
     func testPausedDifferentSourceStartsFresh() {

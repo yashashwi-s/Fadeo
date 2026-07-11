@@ -44,6 +44,7 @@ final class AppController: ObservableObject {
 
     let configStore: ConfigStore
     let usageStore = UsageStore()
+    private let bookmarkStore = PlaybackBookmarkStore()
     private let resolver = Resolver()
     private var resolverState = ResolverState()
     private var usageTrackedWorkspaceID: String?
@@ -136,18 +137,85 @@ final class AppController: ObservableObject {
         }
         external.onPlaybackIssue = { [weak self] msg in self?.audioIssue = msg }
 
+        // Resume exactly where we left off, not from the top: if the last graceful quit
+        // (or a pause before one) left a bookmark, seed our own tracked state as already
+        // "paused" on that source before the very first evaluate() runs. The resolver
+        // doesn't need to know any of this — if the same workspace/source comes up as the
+        // live decision (now, or whenever the user next returns to that context this
+        // session), Reconciler's existing paused-same-source check naturally emits
+        // `.resume` instead of `.start`. One-shot: consumed here regardless of whether
+        // this session ever actually revisits that workspace, so a later quit always
+        // reflects this session's own final state, not a stale replay of an old one.
+        if let bookmark = bookmarkStore.bookmark {
+            seedResume(from: bookmark)
+            bookmarkStore.clear()
+        }
+
         reconcileSensors()
         evaluate()
 
+        // `queue: nil` is deliberate, not the default-ish `.main`: with an explicit queue,
+        // NotificationCenter *enqueues* the block onto it asynchronously rather than
+        // running it as part of the post() call — whether the main run loop gets another
+        // spin to actually execute that queued block before the process exits is a race
+        // (confirmed live: this intermittently lost the bookmark save on quit). `queue:
+        // nil` runs the block synchronously on the posting thread (main, for app
+        // termination), guaranteeing it completes before termination proceeds.
         NotificationCenter.default.addObserver(
-            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+            forName: NSApplication.willTerminateNotification, object: nil, queue: nil
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.recordUsageIfWorkspaceChanged(newWorkspaceID: nil)
                 self.usageStore.flush()
+                self.captureBookmarkNow()
             }
         }
+    }
+
+    /// Only meaningful for a workspace still configured the same way it was when the
+    /// bookmark was saved — if the source changed since (a different folder, a different
+    /// share link), starting fresh is correct and this bookmark no longer applies to
+    /// anything real.
+    private func seedResume(from bookmark: PlaybackBookmark) {
+        guard let ws = configStore.config.workspaces.first(where: { $0.id == bookmark.workspaceID }),
+              ws.enabled, ws.sound.source == bookmark.source
+        else { return }
+        let isExternal = bookmark.source.hasPrefix("external:")
+        activeActuator = isExternal ? .external : .internalEngine
+        audioState = AudioState(source: bookmark.source, volume: ws.sound.volume, playing: false, paused: true)
+        if !isExternal, let queueIndex = bookmark.queueIndex, let positionSeconds = bookmark.positionSeconds {
+            engine.primeResume(queueIndex: queueIndex, positionSeconds: positionSeconds)
+        }
+    }
+
+    /// Captures exactly what's live right now (playing or already paused) into a
+    /// persisted bookmark. Ambient noise presets are never bookmarked — a synthesized
+    /// stream has no meaningful position, restarting one sounds identical to resuming it.
+    /// Called on a graceful quit, and on every pause (manual or a transient context
+    /// fallback) for partial resilience against a later non-graceful crash/force-quit —
+    /// both are real, single events, never a periodic timer.
+    private func captureBookmarkNow() {
+        guard let source = audioState.source, !source.hasPrefix("internal:preset:"),
+              let workspaceID = resolverState.activeWorkspace
+        else {
+            bookmarkStore.clear()
+            return
+        }
+        var queueIndex: Int?
+        var positionSeconds: Double?
+        if activeActuator == .internalEngine {
+            guard let qi = engine.currentQueueIndex, let pos = engine.currentPlaybackPosition() else {
+                bookmarkStore.clear()
+                return
+            }
+            queueIndex = qi
+            positionSeconds = pos
+        }
+        bookmarkStore.save(PlaybackBookmark(
+            workspaceID: workspaceID, source: source,
+            queueIndex: queueIndex, positionSeconds: positionSeconds, savedAt: Date()
+        ))
     }
 
     var activeWorkspaceName: String? {
@@ -319,11 +387,12 @@ final class AppController: ObservableObject {
             case .none: return
             }
             audioState = AudioState(source: audioState.source, volume: audioState.volume, playing: false, paused: true)
+            captureBookmarkNow()   // event-driven resilience against a later non-graceful quit
             updateAudioStatus()
-        } else if audioState.paused {
+        } else if audioState.paused, let source = audioState.source {
             manuallyPaused = false
             cancelPausedTeardown()
-            let command = AudioCommand.resume(volume: audioState.volume, fadeMs: configStore.config.settings.defaults.fadeInMs)
+            let command = AudioCommand.resume(source: source, volume: audioState.volume, fadeMs: configStore.config.settings.defaults.fadeInMs)
             switch activeActuator {
             case .internalEngine: engine.execute(command)
             case .external: external.execute(command)
@@ -485,14 +554,17 @@ final class AppController: ObservableObject {
         let target = d.target
         let command = reconciler.reconcile(current: audioState, target: target, transition: d.transition)
 
-        // Decide which actuator this command belongs to. A start/crossfade names its
-        // source explicitly; a bare stop/pause/resume/setVolume applies to whichever
-        // actuator is already playing (a rule never targets both at once).
+        // Decide which actuator this command belongs to. A start/crossfade/resume names
+        // its source explicitly — route by prefix rather than trusting `activeActuator`,
+        // since a cold resume from a launch-time bookmark seeds `activeActuator` directly
+        // but this is the one command where getting it wrong would silently talk to the
+        // wrong actuator. A bare stop/pause/setVolume has no source, so it applies to
+        // whichever actuator is already playing (a rule never targets both at once).
         let destination: Actuator
         switch command {
-        case .start(let s, _, _), .crossfade(let s, _, _):
+        case .start(let s, _, _), .crossfade(let s, _, _), .resume(let s, _, _):
             destination = s.hasPrefix("external:") ? .external : .internalEngine
-        case .setVolume, .stop, .pause, .resume:
+        case .setVolume, .stop, .pause:
             destination = activeActuator
         case .none:
             destination = activeActuator
@@ -528,9 +600,10 @@ final class AppController: ObservableObject {
         }
         if case .start = command { activeActuator = destination }
         if case .crossfade = command { activeActuator = destination }
+        if case .resume = command { activeActuator = destination }
         if case .stop = command { activeActuator = .none }
-        // .pause/.resume: activeActuator is unchanged — it still "owns" playback, just
-        // silenced or un-silenced in place.
+        // .pause: activeActuator is unchanged — it still "owns" playback, just silenced
+        // in place.
 
         // Optimistically mirror the command into our tracked state (matches the reconciler's
         // model, so we don't re-issue the same fade every context tick).
@@ -538,8 +611,8 @@ final class AppController: ObservableObject {
         case .start(let s, let v, _), .crossfade(let s, let v, _):
             audioState = AudioState(source: s, volume: v, playing: true)
             audioIssue = nil
-        case .resume(let v, _):
-            audioState = AudioState(source: audioState.source, volume: v, playing: true, paused: false)
+        case .resume(let s, let v, _):
+            audioState = AudioState(source: s, volume: v, playing: true, paused: false)
             audioIssue = nil
         case .setVolume(let v, _):
             audioState.volume = v
@@ -561,7 +634,9 @@ final class AppController: ObservableObject {
         // resetting it to "not armed," holding the session open forever instead of the
         // intended 120s cap.
         switch command {
-        case .pause: armPausedTeardown()
+        case .pause:
+            armPausedTeardown()
+            captureBookmarkNow()   // event-driven resilience against a later non-graceful quit
         case .none: break
         default: cancelPausedTeardown()
         }

@@ -34,6 +34,14 @@ final class InternalEngine {
     /// The format the player→mixer connection was last made with; reconnected whenever
     /// the next track's processing format differs (see playCurrentQueueItem).
     private var fileConnectionFormat: AVAudioFormat?
+    /// The frame offset the CURRENT schedule began at within its file — 0 for a full
+    /// `scheduleFile`, or the seek point for a `scheduleSegment` resume. Needed because
+    /// `AVAudioPlayerNode.playerTime(forNodeTime:)`'s `sampleTime` is relative to when the
+    /// current schedule began, not the file's own absolute frame numbering — without
+    /// adding this back in, `currentPlaybackPosition()` reports "elapsed since resume"
+    /// instead of the true position (confirmed live: this made resumed playback appear to
+    /// never advance past roughly the same position each time it was re-bookmarked).
+    private var currentSegmentStartFrame: AVAudioFramePosition = 0
     private var queue: [URL] = []
     private var queueIndex = 0
     private var order: PlaybackOrder = .sequential
@@ -45,6 +53,11 @@ final class InternalEngine {
 
     private var localPlaylists: [LocalPlaylist] = []
     private var activeKind: SourceKind?
+    /// A one-shot resume point consumed by the very next `start()` on the `.files` path —
+    /// set by `AppController` right before it triggers the first `evaluate()` of a launch,
+    /// when a persisted `PlaybackBookmark` matches what's about to start. Cleared as soon
+    /// as it's consumed (or ignored) so it never applies to a later, unrelated start.
+    private var primedResume: (queueIndex: Int, positionSeconds: Double)?
 
     /// Scheduled work for the second half of a crossfade / the end of a fade-out.
     private var pendingWork: DispatchWorkItem?
@@ -70,6 +83,31 @@ final class InternalEngine {
         localPlaylists = playlists
     }
 
+    /// Which file in the current queue is playing, for `AppController` to persist into a
+    /// `PlaybackBookmark`. Nil when not on the file path (nothing to bookmark for presets).
+    var currentQueueIndex: Int? { activeKind == .files ? queueIndex : nil }
+
+    /// Elapsed seconds into the current file. `playerTime.sampleTime` is relative to when
+    /// the current schedule began, NOT the file's absolute frame numbering, so
+    /// `currentSegmentStartFrame` (0 for a full file, the seek point for a resumed
+    /// segment) has to be added back in to get the true position. Nil when not on the
+    /// file path or the node has no render time yet.
+    func currentPlaybackPosition() -> Double? {
+        guard activeKind == .files, let node = playerNode,
+              let nodeTime = node.lastRenderTime,
+              let playerTime = node.playerTime(forNodeTime: nodeTime),
+              playerTime.sampleRate > 0
+        else { return nil }
+        return Double(currentSegmentStartFrame) / playerTime.sampleRate + Double(playerTime.sampleTime) / playerTime.sampleRate
+    }
+
+    /// Set by `AppController` right before the first `evaluate()` of a launch, when a
+    /// persisted bookmark matches the source about to start — the next `start()` on the
+    /// `.files` path begins at this queue position instead of the first file/second 0.
+    func primeResume(queueIndex: Int, positionSeconds: Double) {
+        primedResume = (queueIndex, max(0, positionSeconds))
+    }
+
     // MARK: Command execution (called on main from the AppController)
 
     func execute(_ command: AudioCommand, order: PlaybackOrder = .sequential, repeatMode: RepeatMode = .all) {
@@ -86,8 +124,8 @@ final class InternalEngine {
             setVolume(volume, ms: ms)
         case .pause(let fadeMs):
             pause(fadeMs: fadeMs)
-        case .resume(let volume, let fadeMs):
-            resume(volume: volume, fadeMs: fadeMs)
+        case .resume(let source, let volume, let fadeMs):
+            resume(source: source, volume: volume, fadeMs: fadeMs)
         case .stop(let fadeMs):
             stop(fadeMs: fadeMs)
         }
@@ -124,12 +162,19 @@ final class InternalEngine {
                 return
             }
             queue = order == .shuffle ? urls.shuffled() : urls
-            queueIndex = 0
+            // A primed resume point only applies once, and only to the queue it was
+            // computed against — a shuffled re-order or a shrunk queue since the bookmark
+            // was saved just falls back to track 1/second 0 rather than landing on the
+            // wrong file.
+            let resume = primedResume
+            primedResume = nil
+            let canResume = resume != nil && order != .shuffle && queue.indices.contains(resume!.queueIndex)
+            queueIndex = canResume ? resume!.queueIndex : 0
             configureFileIfNeeded()
             startEngineIfNeeded()
             activeKind = .files
             state = AudioState(source: source, volume: volume, playing: true)
-            playCurrentQueueItem(fadeInMs: fadeMs)
+            playCurrentQueueItem(fadeInMs: fadeMs, startSeconds: canResume ? resume!.positionSeconds : 0)
         }
     }
 
@@ -213,19 +258,25 @@ final class InternalEngine {
     }
 
     /// Ramp back up in place from a `pause()` — never re-resolves the queue or re-opens
-    /// the file, so playback continues from exactly where it paused.
-    private func resume(volume: Double, fadeMs: Int) {
+    /// the file, so playback continues from exactly where it paused. `source` is always
+    /// supplied by the caller (never inferred from `state.source`): on a cold resume from
+    /// a launch-time bookmark, this is a fresh engine instance whose own `state`/
+    /// `activeKind` know nothing about the bookmark yet (only `primeResume` was called),
+    /// so relying on `state.source` here would silently do nothing — confirmed live, this
+    /// was the actual bug behind an intermittently-silent cold resume.
+    private func resume(source: String, volume: Double, fadeMs: Int) {
         pendingWork?.cancel()
-        guard state.paused, activeKind != nil else {
-            // Nothing held open to resume (e.g. the bounded hard-teardown timer upstream
-            // already tore this down) — fall back to a fresh start of the same source.
-            if let source = state.source { start(source: source, volume: volume, fadeMs: fadeMs) }
+        guard state.paused, state.source == source, activeKind != nil else {
+            // Not a warm in-session pause of this exact source (e.g. a cold launch from a
+            // bookmark, or the bounded hard-teardown timer already tore a warm pause down)
+            // — fall back to a fresh start, which picks up any primed resume point.
+            start(source: source, volume: volume, fadeMs: fadeMs)
             return
         }
         switch activeKind {
         case .preset:
             startEngineIfNeeded()
-            renderer.setRamp(to: calibratedGain(volume, source: state.source ?? ""), ms: fadeMs, sampleRate: sampleRate)
+            renderer.setRamp(to: calibratedGain(volume, source: source), ms: fadeMs, sampleRate: sampleRate)
         case .files:
             startEngineIfNeeded()
             playerNode?.play()
@@ -233,7 +284,7 @@ final class InternalEngine {
         case nil:
             break
         }
-        state = AudioState(source: state.source, volume: volume, playing: true)
+        state = AudioState(source: source, volume: volume, playing: true)
     }
 
     /// Immediate full teardown after playback ended on its own; releases the audio HAL so
@@ -254,7 +305,7 @@ final class InternalEngine {
     /// giving up — without it, a queue where the current (or only) file can't be opened
     /// recurses forever: `(i+1) % count` wraps back to the same bad file and retries
     /// endlessly, overflowing the stack. Defaults to one full pass over the queue.
-    private func playCurrentQueueItem(fadeInMs: Int, attemptsLeft: Int? = nil) {
+    private func playCurrentQueueItem(fadeInMs: Int, attemptsLeft: Int? = nil, startSeconds: Double = 0) {
         guard let node = playerNode, queue.indices.contains(queueIndex) else { return }
         let budget = attemptsLeft ?? queue.count
         let url = queue[queueIndex]
@@ -276,10 +327,22 @@ final class InternalEngine {
         }
         playbackGeneration += 1
         let generation = playbackGeneration
-        node.scheduleFile(file, at: nil) { [weak self] in
+        let completion: AVAudioNodeCompletionHandler = { [weak self] in
             DispatchQueue.main.async {
                 self?.handleTrackFinished(generation: generation)
             }
+        }
+        // A resume bookmark seeks into the file via scheduleSegment rather than the whole
+        // file from the top. Guard against a stale bookmark outliving the file (it got
+        // shorter, or this isn't really the same file) by falling back to the full file.
+        let startFrame = AVAudioFramePosition(startSeconds * file.processingFormat.sampleRate)
+        if startFrame > 0, startFrame < file.length {
+            let remaining = AVAudioFrameCount(file.length - startFrame)
+            node.scheduleSegment(file, startingFrame: startFrame, frameCount: remaining, at: nil, completionHandler: completion)
+            currentSegmentStartFrame = startFrame
+        } else {
+            node.scheduleFile(file, at: nil, completionHandler: completion)
+            currentSegmentStartFrame = 0
         }
         if !node.isPlaying { node.play() }
         // Read state.volume live (not a value captured earlier in the completion chain) so
@@ -479,6 +542,7 @@ final class InternalEngine {
         playerNode?.stop()
         fileMixer.outputVolume = 0
     }
+
 }
 
 // MARK: - Real-time noise renderer

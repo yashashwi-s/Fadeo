@@ -107,12 +107,16 @@ final class ExternalConductor {
             let target = parse(state.source ?? "")
             state = AudioState(source: state.source, volume: state.volume, playing: false, paused: true)
             work.async { [weak self] in self?.performStop(target: target) }
-        case .resume(let volume, _):
-            // Never re-cue: Music/Spotify already remember exactly where they paused, so
-            // resuming just needs a bare `play`, not the whole open-location/verify dance.
-            state = AudioState(source: state.source, volume: volume, playing: true, paused: false)
-            let target = parse(state.source ?? "")
-            work.async { [weak self] in self?.performResume(target: target, volume: volume) }
+        case .resume(let source, let volume, _):
+            // Never re-cue: Music/Spotify already remember exactly where they paused (or,
+            // for a cold resume from a launch-time PlaybackBookmark, where they were left
+            // the last time they quit), so resuming just needs a bare `play`, not the
+            // whole open-location/verify dance. `source` comes from the caller, not our
+            // own `state.source` — on a cold resume this is a fresh instance with nothing
+            // of its own to fall back on (the same bug confirmed live in InternalEngine).
+            state = AudioState(source: source, volume: volume, playing: true, paused: false)
+            let target = parse(source)
+            work.async { [weak self] in self?.performResume(target: target, volume: volume, generation: gen) }
         case .stop:
             // Capture which app we were conducting BEFORE clearing state.
             let target = parse(state.source ?? "")
@@ -156,24 +160,24 @@ final class ExternalConductor {
     /// currently holds Now Playing.
     func next() { mediaRemote.next() }
 
-    /// Resume from a `pause()`, never re-cueing (no `open location`, no verify loop) —
-    /// Music/Spotify already hold the exact paused position, so a bare `play` continues
-    /// it. Only launches the app if it's still running from the pause (never headless-
-    /// launches here; if it quit in the meantime there's nothing to resume into).
-    private func performResume(target: Target, volume: Double) {
+    /// Resume from a `pause()` (warm — the app is still running from a mid-session pause)
+    /// or a cold launch-time resume from a persisted `PlaybackBookmark` (the app may have
+    /// fully quit). Either way, never re-cue (no `open location`, no verify loop): Music
+    /// and Spotify both remember exactly where they left off across their OWN relaunches,
+    /// same as they would if you reopened them yourself, so a bare `play` continues right
+    /// where they were. Only the headless-launch-and-wait is new here versus the warm
+    /// path — once the app can answer a query, `play` behaves identically either way.
+    private func performResume(target: Target, volume: Double, generation gen: Int) {
         switch target {
-        case .appleMusic:
-            if isRunning("com.apple.Music") {
-                AppleScriptRunner.run(#"tell application "Music" to play"#)
-            } else {
-                mediaRemote.play()
+        case .appleMusic, .spotify:
+            guard let appName = target.appName, let bundleID = target.bundleID else { return }
+            if !isRunning(bundleID) {
+                launchHeadlessAndWait(bundleID: bundleID)
+                guard isCurrent(gen) else { return }
+                waitUntilScriptable(appName: appName, generation: gen)
+                guard isCurrent(gen) else { return }
             }
-        case .spotify:
-            if isRunning("com.spotify.client") {
-                AppleScriptRunner.run(#"tell application "Spotify" to play"#)
-            } else {
-                mediaRemote.play()
-            }
+            AppleScriptRunner.run(#"tell application "\#(appName)" to play"#)
         case .generic:
             mediaRemote.play()
         }

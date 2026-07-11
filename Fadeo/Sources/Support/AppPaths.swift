@@ -18,6 +18,10 @@ enum AppPaths {
         supportDirectory.appendingPathComponent("usage.yaml")
     }
 
+    static var playbackBookmarkFile: URL {
+        supportDirectory.appendingPathComponent("playback-bookmark.yaml")
+    }
+
     /// Create the support directory if needed.
     static func ensureSupportDirectory() throws {
         try FileManager.default.createDirectory(at: supportDirectory, withIntermediateDirectories: true)

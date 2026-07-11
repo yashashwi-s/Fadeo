@@ -37,8 +37,11 @@ public enum AudioCommand: Sendable, Equatable {
     case setVolume(Double, ms: Int)
     /// Ramp to silence but hold the session open, resumable in place (see `AudioState.paused`).
     case pause(fadeMs: Int)
-    /// Ramp back up in place — never re-schedules/re-cues, unlike `.start`.
-    case resume(volume: Double, fadeMs: Int)
+    /// Ramp back up in place — never re-schedules/re-cues, unlike `.start`. Carries the
+    /// source explicitly (like `.start`/`.crossfade`) rather than relying on whatever the
+    /// actuator's own internal state already remembers: on a cold resume from a launch-
+    /// time bookmark, the actuator has no prior state of its own to fall back on.
+    case resume(source: String, volume: Double, fadeMs: Int)
     case stop(fadeMs: Int)
 }
 
@@ -86,7 +89,7 @@ public struct Reconciler {
                 return .none   // play-once queue already completed; a context tick must not restart it
             }
             if current.paused, current.source == src {
-                return .resume(volume: target.volume, fadeMs: t.fadeInMs)   // exact-position resume, not a restart
+                return .resume(source: src, volume: target.volume, fadeMs: t.fadeInMs)   // exact-position resume, not a restart
             }
             if !current.playing {
                 return .start(source: src, volume: target.volume, fadeMs: t.fadeInMs)
