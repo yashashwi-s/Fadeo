@@ -8,6 +8,8 @@ struct WorkspaceEditor: View {
     let allPlaylists: [LocalPlaylist]
     var savedSounds: [SavedSound] = []
     var onSaveSound: ((String, String) -> Void)?
+    var onTogglePreview: ((Sound) -> Void)?
+    var previewingSource: String?
 
     var body: some View {
         ScrollView {
@@ -221,7 +223,8 @@ struct WorkspaceEditor: View {
         Card(title: "Sound") {
             SoundEditor(sound: $workspace.sound, memberApps: workspace.match.apps.map(\.bundle),
                        installedApps: installedApps, allPlaylists: allPlaylists,
-                       savedSounds: savedSounds, onSaveSound: onSaveSound)
+                       savedSounds: savedSounds, onSaveSound: onSaveSound,
+                       onTogglePreview: onTogglePreview, previewingSource: previewingSource)
         }
     }
 

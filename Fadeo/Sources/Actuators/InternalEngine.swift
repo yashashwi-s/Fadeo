@@ -318,6 +318,10 @@ final class InternalEngine {
         case .brown: cal = 1.0
         case .pink:  cal = 0.85
         case .white: cal = 0.5
+        case .rain:  cal = 0.75
+        case .ocean: cal = 0.95
+        case .wind:  cal = 0.8
+        case .fan:   cal = 0.9
         }
         return Float(volume) * cal
     }
@@ -390,30 +394,46 @@ final class InternalEngine {
 /// worst case is a one-sample discontinuity, never a crash.
 private final class NoiseRenderer {
     enum Kind: Int {
-        case brown, pink, white
+        case brown, pink, white, rain, ocean, wind, fan
         init(source: String) {
             if source.contains("white") { self = .white }
-            else if source.contains("pink") || source.contains("rain") { self = .pink }
+            else if source.contains("pink") { self = .pink }
+            else if source.contains("rain") { self = .rain }
+            else if source.contains("ocean") { self = .ocean }
+            else if source.contains("wind") { self = .wind }
+            else if source.contains("fan") { self = .fan }
             else { self = .brown }   // brown-noise and default
         }
     }
 
     var kind: Kind = .brown
+    var sampleRate: Double = 48_000
 
     // Fade envelope (per-sample ramp)
     private var currentGain: Float = 0
     private var targetGain: Float = 0
     private var gainStep: Float = 0
 
-    // DSP state (audio thread)
+    // Core noise state (audio thread)
     private var rng: UInt32 = 0x9E37_79B9
     private var brownLast: Float = 0
     private var p0: Float = 0, p1: Float = 0, p2: Float = 0, p3: Float = 0
     private var p4: Float = 0, p5: Float = 0, p6: Float = 0
 
+    // Texture DSP state
+    private var lpA: Float = 0, lpB: Float = 0        // cascaded one-pole low-pass (ocean/fan)
+    private var hpLast: Float = 0, hpPrev: Float = 0  // one-pole high-pass (rain brightness)
+    private var svLow: Float = 0, svBand: Float = 0   // state-variable bandpass (wind)
+    private var oceanPhase: Float = 0                 // wave swell LFO
+    private var gustPhase: Float = 0                  // wind gust LFO
+    private var humPhase: Float = 0                   // fan tonal hum
+    private var dropEnv: Float = 0                    // rain droplet decay
+    private var dropPhase: Float = 0, dropInc: Float = 0
+
     private let headroom: Float = 0.38   // keep well below clipping
 
     func setRamp(to value: Float, ms: Int, sampleRate: Double) {
+        self.sampleRate = sampleRate
         targetGain = value
         if ms <= 0 {
             currentGain = value
@@ -452,20 +472,91 @@ private final class NoiseRenderer {
         case .white:
             return white
         case .brown:
-            brownLast = (brownLast + 0.02 * white) / 1.02
-            return brownLast * 3.5
+            return brown(white) * 3.5
         case .pink:
-            // Paul Kellet's economy pink-noise filter.
-            p0 = 0.99886 * p0 + white * 0.0555179
-            p1 = 0.99332 * p1 + white * 0.0750759
-            p2 = 0.96900 * p2 + white * 0.1538520
-            p3 = 0.86650 * p3 + white * 0.3104856
-            p4 = 0.55000 * p4 + white * 0.5329522
-            p5 = -0.7616 * p5 - white * 0.0168980
-            let pink = p0 + p1 + p2 + p3 + p4 + p5 + p6 + white * 0.5362
-            p6 = white * 0.115926
-            return pink * 0.5
+            return pink(white)
+        case .rain:
+            // Bright, band-limited hiss (high-passed pink) plus sparse decaying droplets.
+            let base = highPass(pink(white)) * 1.4
+            if dropEnv < 0.001, nextUnit() < 0.0012 {           // ~58 drops/sec at 48k
+                dropEnv = 0.6 + 0.4 * nextUnit()
+                dropInc = (2500 + 3500 * nextUnit()) * 2 * .pi / Float(sampleRate)
+                dropPhase = 0
+            }
+            var drop: Float = 0
+            if dropEnv > 0.001 {
+                drop = sin(dropPhase) * dropEnv
+                dropPhase += dropInc
+                dropEnv *= 0.992                                 // fast decay = a "tick"
+            }
+            return base * 0.7 + drop * 0.5
+        case .ocean:
+            // Slow swell: low-passed brown modulated by a ~0.09 Hz wave envelope.
+            let wash = lowPass(brown(white) * 3.5)
+            oceanPhase += 2 * .pi * 0.09 / Float(sampleRate)
+            if oceanPhase > 2 * .pi { oceanPhase -= 2 * .pi }
+            let swell = 0.28 + 0.72 * (0.5 + 0.5 * sin(oceanPhase))
+            return wash * swell * 1.7
+        case .wind:
+            // Resonant band-passed white with a gusting amplitude (~0.14 Hz).
+            let band = bandPass(white)
+            gustPhase += 2 * .pi * 0.14 / Float(sampleRate)
+            if gustPhase > 2 * .pi { gustPhase -= 2 * .pi }
+            let gust = 0.25 + 0.75 * (0.5 + 0.5 * sin(gustPhase))
+            return band * gust * 2.2
+        case .fan:
+            // Steady low-passed hiss plus a faint tonal hum, like an AC unit or box fan.
+            let air = lowPass(white) * 1.6
+            humPhase += 2 * .pi * 110 / Float(sampleRate)
+            if humPhase > 2 * .pi { humPhase -= 2 * .pi }
+            let hum = sin(humPhase) * 0.12
+            return air * 0.9 + hum
         }
+    }
+
+    // MARK: DSP primitives (all one-liners of persistent state; real-time safe)
+
+    private func brown(_ white: Float) -> Float {
+        brownLast = (brownLast + 0.02 * white) / 1.02
+        return brownLast
+    }
+
+    private func pink(_ white: Float) -> Float {
+        // Paul Kellet's economy pink-noise filter.
+        p0 = 0.99886 * p0 + white * 0.0555179
+        p1 = 0.99332 * p1 + white * 0.0750759
+        p2 = 0.96900 * p2 + white * 0.1538520
+        p3 = 0.86650 * p3 + white * 0.3104856
+        p4 = 0.55000 * p4 + white * 0.5329522
+        p5 = -0.7616 * p5 - white * 0.0168980
+        let out = p0 + p1 + p2 + p3 + p4 + p5 + p6 + white * 0.5362
+        p6 = white * 0.115926
+        return out * 0.5
+    }
+
+    /// Two cascaded one-pole low-passes (~gentle roll-off, warms/darkens).
+    private func lowPass(_ x: Float) -> Float {
+        lpA += 0.08 * (x - lpA)
+        lpB += 0.08 * (lpA - lpB)
+        return lpB
+    }
+
+    /// One-pole high-pass (brightens — removes the low rumble for rain hiss).
+    private func highPass(_ x: Float) -> Float {
+        let y = 0.92 * (hpPrev + x - hpLast)
+        hpLast = x
+        hpPrev = y
+        return y
+    }
+
+    /// State-variable bandpass centered ~500 Hz, moderate Q — the whistle of wind.
+    private func bandPass(_ x: Float) -> Float {
+        let f: Float = 2 * sin(.pi * 500 / Float(sampleRate))
+        let q: Float = 0.4
+        svLow += f * svBand
+        let high = x - svLow - q * svBand
+        svBand += f * high
+        return svBand
     }
 
     /// Fast xorshift PRNG → white noise in [-1, 1]. Real-time safe (no allocation/locks).
@@ -474,5 +565,13 @@ private final class NoiseRenderer {
         rng ^= rng >> 17
         rng ^= rng << 5
         return Float(Int32(bitPattern: rng)) / Float(Int32.max)
+    }
+
+    /// Uniform in [0, 1).
+    private func nextUnit() -> Float {
+        rng ^= rng << 13
+        rng ^= rng >> 17
+        rng ^= rng << 5
+        return Float(rng) / Float(UInt32.max)
     }
 }

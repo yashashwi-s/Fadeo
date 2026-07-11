@@ -49,6 +49,13 @@ final class AppController: ObservableObject {
     private enum Actuator: Equatable { case none, internalEngine, external }
     private var activeActuator: Actuator = .none
 
+    // Preview: a dedicated engine so auditioning a sound in the editor never touches the
+    // live pipeline's tracked state. While previewing, evaluate() is suppressed and the
+    // live output is silenced; stopping preview re-applies the active workspace's audio.
+    private let previewEngine = InternalEngine()
+    @Published private(set) var previewingSource: String?
+    private var isPreviewing: Bool { previewingSource != nil }
+
     // Sensors, lazily activated: a sensor whose fields no enabled workspace references
     // is never started (zero observers, zero cost). See requiredFields()/reconcileSensors().
     private let appFocus = AppFocusSensor()
@@ -199,8 +206,46 @@ final class AppController: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(ms), execute: work)
     }
 
+    // MARK: Preview (audition a sound in the editor)
+
+    /// Play an internal source (preset/file/folder) on the dedicated preview engine.
+    /// External sources aren't previewed here — auditioning them would mean driving the
+    /// very same Music/Spotify session the workspace already uses, so the editor offers
+    /// no preview for those. Toggling the same source off stops it.
+    func togglePreview(_ sound: Sound) {
+        guard let source = sound.source, source.hasPrefix("internal:") else { return }
+        if previewingSource == source {
+            stopPreview()
+            return
+        }
+        // First time entering preview: silence the live output and reset tracked state
+        // so it re-applies cleanly when preview ends. (audioState left stale would make
+        // the reconciler think nothing changed and never restart the workspace's audio.)
+        if !isPreviewing {
+            engine.execute(.stop(fadeMs: 150))
+            external.execute(.stop(fadeMs: 150))
+            audioState = .silent
+            activeActuator = .none
+        }
+        previewEngine.updateLocalPlaylists(configStore.config.localPlaylists)
+        previewEngine.execute(.stop(fadeMs: 0))
+        previewEngine.execute(
+            .start(source: source, volume: sound.volume, fadeMs: 150),
+            order: sound.order, repeatMode: sound.repeatMode
+        )
+        previewingSource = source
+    }
+
+    func stopPreview() {
+        guard isPreviewing else { return }
+        previewEngine.execute(.stop(fadeMs: 150))
+        previewingSource = nil
+        // Re-apply the live workspace audio once the preview has faded.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.evaluate() }
+    }
+
     private func evaluate() {
-        guard !automationPaused else { return }
+        guard !automationPaused, !isPreviewing else { return }
         context.localTime = Date()
         let d = resolver.resolve(context: context, config: configStore.config, state: resolverState)
         decision = d   // the Now pane always shows the live resolution, gated or not
@@ -363,7 +408,7 @@ final class AppController: ObservableObject {
 
         switch destination {
         case .internalEngine: engine.execute(command, order: target.order, repeatMode: target.repeatMode)
-        case .external: external.execute(command)
+        case .external: external.execute(command, order: target.order, repeatMode: target.repeatMode)
         case .none: break
         }
         if case .start = command { activeActuator = destination }

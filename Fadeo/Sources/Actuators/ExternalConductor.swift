@@ -83,7 +83,7 @@ final class ExternalConductor {
 
     // MARK: Command execution (called on main)
 
-    func execute(_ command: AudioCommand) {
+    func execute(_ command: AudioCommand, order: PlaybackOrder = .sequential, repeatMode: RepeatMode = .all) {
         let gen = bumpGeneration()
         switch command {
         case .none:
@@ -91,7 +91,7 @@ final class ExternalConductor {
         case .start(let source, let volume, _), .crossfade(let source, let volume, _):
             state = AudioState(source: source, volume: volume, playing: true)
             let target = parse(source)
-            work.async { [weak self] in self?.performStart(target: target, volume: volume, generation: gen) }
+            work.async { [weak self] in self?.performStart(target: target, volume: volume, order: order, repeatMode: repeatMode, generation: gen) }
         case .setVolume(let volume, _):
             state.volume = volume
             let target = parse(state.source ?? "")
@@ -137,7 +137,7 @@ final class ExternalConductor {
 
     // MARK: Start (background queue)
 
-    private func performStart(target: Target, volume: Double, generation gen: Int) {
+    private func performStart(target: Target, volume: Double, order: PlaybackOrder, repeatMode: RepeatMode, generation gen: Int) {
         switch target {
         case .generic:
             mediaRemote.play()
@@ -178,7 +178,27 @@ final class ExternalConductor {
             if let cue { AppleScriptRunner.run(cue) }
             verifyPlaying(appName: appName, cue: cue, generation: gen)
             guard isCurrent(gen) else { return }
+            // Shuffle/repeat only stick once something is actually playing — an empty
+            // queue can't shuffle — so set them AFTER playback is confirmed, not before.
+            applyShuffleRepeat(appName: appName, order: order, repeatMode: repeatMode)
             performSetVolume(volume, target: target)
+        }
+    }
+
+    /// Configure the external app's own shuffle/repeat to match the workspace, so e.g.
+    /// "Deep Work → Apple Music, shuffled, repeat all" actually shuffles Music. Music
+    /// and Spotify expose different AppleScript vocabularies for this. (These setters
+    /// only take effect during active playback, hence the ordering above.)
+    private func applyShuffleRepeat(appName: String, order: PlaybackOrder, repeatMode: RepeatMode) {
+        if appName == "Music" {
+            AppleScriptRunner.run(#"tell application "Music" to set shuffle enabled to \#(order == .shuffle)"#)
+            let mode = { switch repeatMode { case .off: return "off"; case .one: return "one"; case .all: return "all" } }()
+            AppleScriptRunner.run(#"tell application "Music" to set song repeat to \#(mode)"#)
+        } else {
+            AppleScriptRunner.run(#"tell application "Spotify" to set shuffling to \#(order == .shuffle)"#)
+            // Spotify's AppleScript repeat is a single on/off (loop the context); map
+            // both "one" and "all" to on, "off" to off.
+            AppleScriptRunner.run(#"tell application "Spotify" to set repeating to \#(repeatMode != .off)"#)
         }
     }
 

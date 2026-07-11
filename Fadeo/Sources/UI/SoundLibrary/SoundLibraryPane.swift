@@ -105,8 +105,11 @@ struct SoundLibraryPane: View {
                 presetRow("Brown noise", "Deep and warm, the default for focus work.")
                 presetRow("Pink noise", "Softer high end than white noise.")
                 presetRow("White noise", "Flat across all frequencies, the most masking.")
-                presetRow("Rain", "A pink-noise texture tuned to read as rainfall.")
-                Text("Synthesized in real time. No audio files shipped, no looping seams.")
+                presetRow("Rain", "Bright hiss with scattered droplets.")
+                presetRow("Ocean waves", "A slow brown-noise swell that rolls in and out.")
+                presetRow("Wind", "Band-passed gusting, like air over a ridge.")
+                presetRow("Fan / hum", "Steady low air with a faint tonal hum.")
+                Text("Synthesized in real time. No audio files shipped, no looping seams. Pick one in a workspace's Sound section and press Preview to hear it.")
                     .font(.caption2).foregroundStyle(.tertiary)
             }
         }

@@ -16,6 +16,10 @@ struct SoundEditor: View {
     /// Persist a new saved sound (name, source) into the config. Provided by the pane
     /// that owns config access; the editor itself only sees the workspace binding.
     var onSaveSound: ((String, String) -> Void)?
+    /// Audition a sound through the controller's dedicated preview engine.
+    var onTogglePreview: ((Sound) -> Void)?
+    /// The source currently previewing (from the controller), to show play/stop state.
+    var previewingSource: String?
 
     /// Local draft of the external link/playlist text. Committing on submit/blur (not
     /// every keystroke) matters: each save re-evaluates, and if this workspace is
@@ -57,7 +61,7 @@ struct SoundEditor: View {
         }
     }
 
-    private static let presets = ["brown-noise", "pink-noise", "white-noise", "rain"]
+    private static let presets = ["brown-noise", "pink-noise", "white-noise", "rain", "ocean", "wind", "fan"]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -80,10 +84,9 @@ struct SoundEditor: View {
             }
 
             if displayedKind != .silence {
+                playbackControls
                 volumeRow
-                if displayedKind == .folder || displayedKind == .playlist {
-                    orderRepeatRow
-                }
+                previewRow
             }
 
             actionRow
@@ -225,6 +228,9 @@ struct SoundEditor: View {
         case "pink-noise": return "Pink noise"
         case "white-noise": return "White noise"
         case "rain": return "Rain"
+        case "ocean": return "Ocean waves"
+        case "wind": return "Wind"
+        case "fan": return "Fan / hum"
         default: return p
         }
     }
@@ -355,19 +361,73 @@ struct SoundEditor: View {
         }
     }
 
-    private var orderRepeatRow: some View {
-        HStack {
-            Picker("Order", selection: $sound.order) {
-                Text("Sequential").tag(PlaybackOrder.sequential)
-                Text("Shuffle").tag(PlaybackOrder.shuffle)
+    // MARK: Playback controls (per source kind)
+
+    @ViewBuilder
+    private var playbackControls: some View {
+        switch displayedKind {
+        case .file:
+            // A single file: loop it, or play once and fall silent.
+            Toggle("Loop", isOn: Binding(
+                get: { sound.repeatMode != .off },
+                set: { sound.repeatMode = $0 ? .one : .off }
+            ))
+            .font(.callout)
+        case .folder, .playlist:
+            HStack(spacing: 16) {
+                Picker("Order", selection: $sound.order) {
+                    Text("In order").tag(PlaybackOrder.sequential)
+                    Text("Shuffle").tag(PlaybackOrder.shuffle)
+                }
+                Picker("Repeat", selection: $sound.repeatMode) {
+                    Text("All").tag(RepeatMode.all)
+                    Text("One").tag(RepeatMode.one)
+                    Text("Off").tag(RepeatMode.off)
+                }
             }
-            Picker("Repeat", selection: $sound.repeatMode) {
-                Text("All").tag(RepeatMode.all)
-                Text("One").tag(RepeatMode.one)
-                Text("Off").tag(RepeatMode.off)
+            .font(.caption)
+        case .external:
+            // Fadeo sets these on Music/Spotify itself when the workspace activates.
+            HStack(spacing: 16) {
+                Toggle("Shuffle", isOn: Binding(
+                    get: { sound.order == .shuffle },
+                    set: { sound.order = $0 ? .shuffle : .sequential }
+                ))
+                Picker("Repeat", selection: $sound.repeatMode) {
+                    Text("Off").tag(RepeatMode.off)
+                    Text("Track").tag(RepeatMode.one)
+                    Text("All").tag(RepeatMode.all)
+                }
+                .frame(maxWidth: 160)
+            }
+            .font(.callout)
+        case .preset, .silence:
+            EmptyView()
+        }
+    }
+
+    // MARK: Preview
+
+    @ViewBuilder
+    private var previewRow: some View {
+        // Preview only internal sources; auditioning external would drive the same
+        // Music/Spotify session the workspace uses (see AppController.togglePreview).
+        if let onTogglePreview, let source = sound.source, source.hasPrefix("internal:") {
+            let isPreviewingThis = (previewingSource == source)
+            HStack(spacing: 8) {
+                Button {
+                    onTogglePreview(sound)
+                } label: {
+                    Label(isPreviewingThis ? "Stop preview" : "Preview",
+                          systemImage: isPreviewingThis ? "stop.fill" : "play.fill")
+                }
+                if isPreviewingThis {
+                    Text("Auditioning — the live workspace audio resumes when you stop.")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                }
+                Spacer()
             }
         }
-        .font(.caption)
     }
 
     private var actionRow: some View {

@@ -20,6 +20,8 @@ struct WorkspacesPane: View {
             installedApps = InstalledApps.scan()
             if selection == nil { selection = config.workspaces.first?.id }
         }
+        .onDisappear { controller.stopPreview() }
+        .onChange(of: selection) { _, _ in controller.stopPreview() }
         .navigationTitle("Workspaces")
     }
 
@@ -63,7 +65,9 @@ struct WorkspacesPane: View {
             WorkspaceEditor(workspace: binding, installedApps: installedApps,
                             allPlaylists: config.localPlaylists,
                             savedSounds: config.savedSounds,
-                            onSaveSound: { name, source in saveSound(name: name, source: source) })
+                            onSaveSound: { name, source in saveSound(name: name, source: source) },
+                            onTogglePreview: { sound in controller.togglePreview(sound) },
+                            previewingSource: controller.previewingSource)
                 .id(id)   // fresh form state per workspace
         } else {
             ContentUnavailableView("No workspace selected", systemImage: "square.stack.3d.up")

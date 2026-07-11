@@ -170,9 +170,14 @@ risk (PLAN.md §18), not a bug.
 ### Actuators
 
 `InternalEngine` (`Fadeo/Sources/Actuators/InternalEngine.swift`) is the only actuator so
-far: an `AVAudioEngine` with a real-time render block that *synthesizes* ambient noise
-(brown/pink/white via `NoiseRenderer`) rather than shipping audio files — no assets, no
-looping seams, tiny footprint. Fades are sample-accurate gain ramps computed on the
+far: an `AVAudioEngine` with a real-time render block that *synthesizes* ambient textures
+(`NoiseRenderer`, seven kinds: brown/pink/white plus rain, ocean, wind, fan — the latter
+four are DSP variations, e.g. ocean is LFO-swelled low-passed brown, wind is a gusting
+state-variable bandpass, rain is high-passed pink with sparse decaying droplets) rather
+than shipping audio files — no assets, no looping seams, tiny footprint. All texture DSP
+is per-sample and allocation/lock-free (real-time safe); adding a texture means a case in
+`NoiseRenderer.Kind`, `nextSample()`, `calibratedGain`, and the preset lists in
+`SoundEditor`/`SoundLibraryPane`. Fades are sample-accurate gain ramps computed on the
 control thread and applied per-sample on the audio thread (benign lock-free races by
 design, worst case a one-sample discontinuity). The engine also runs a second,
 independent playback path (`AVAudioPlayerNode` + a dedicated mixer) for real files —
@@ -234,11 +239,22 @@ the sidebar straight to a given pane. Neither is read anywhere except at launch,
 is set by the shipped app or `make run`/`install` — safe to leave in, trivial to strip
 before a release build if ever desired.
 
-`Sound Library`'s deliberate scope cut: no live audio preview button. Wiring one safely
-would mean bypassing `applyAudio`'s state tracking (`audioState`/`activeActuator`), which
-risks the Now pane and menu bar showing a workspace that isn't what's actually playing.
-Documented as a clean follow-up (a dedicated suppress-evaluation preview mode), not shipped
-half-finished.
+**Preview** (the previously-cut feature, now built): a workspace's Sound section has a
+Preview button for internal sources (preset/file/folder). It plays on a *separate*
+`InternalEngine` instance (`AppController.previewEngine`) so it never touches the live
+pipeline's `audioState`/`activeActuator`. Entering preview silences the live output and
+resets that tracked state (so it re-applies cleanly on exit); `evaluate()` is suppressed
+while `previewingSource != nil`; `stopPreview()` re-runs evaluation to resume the active
+workspace. Preview is stopped on pane-disappear and workspace-selection-change. External
+sources are deliberately *not* previewed — auditioning them would drive the very same
+Music/Spotify session the workspace uses.
+
+**External shuffle/repeat**: `ExternalConductor.applyShuffleRepeat` maps the workspace's
+`order`/`repeatMode` onto the app's own controls (`Music`: `shuffle enabled` + `song
+repeat`; `Spotify`: `shuffling` + `repeating`). It runs *after* playback is confirmed, not
+before — these setters no-op on an empty queue (you can't shuffle nothing). Reliable on
+stable macOS; on the macOS 26 beta the Apple Music setters were observed to no-op even
+mid-playback, so treat external shuffle/repeat as best-effort, not guaranteed.
 
 ## Onboarding and project status
 
