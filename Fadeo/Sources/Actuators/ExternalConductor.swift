@@ -370,11 +370,43 @@ final class ExternalConductor {
         guard parts.count >= 2 else { return .generic }
         if parts[1] == "command" { return .generic }
         let playlist: String? = (parts.count >= 4 && parts[2] == "playlist") ? parts[3] : nil
+        // A playlist that's actually a share link names its own service in its host --
+        // trust that over the stored prefix. Belt-and-braces for a config saved before
+        // SoundEditor started host-sniffing on paste, or hand-edited YAML: without this,
+        // a Spotify/YouTube link saved under "appleMusic" gets handed to Music.app's
+        // `open location`, which doesn't reject it -- it just plays garbage (confirmed
+        // live: a raw catalog id where a track name should be).
+        if let playlist, let override = providerFromHost(playlist) {
+            switch override {
+            case .known("spotify"): return .spotify(playlist: playlist)
+            case .known: return .appleMusic(playlist: playlist)
+            case .unsupported: return .generic   // e.g. YouTube Music -- nothing here can conduct it
+            }
+        }
         switch parts[1] {
         case "appleMusic": return .appleMusic(playlist: playlist)
         case "spotify": return .spotify(playlist: playlist)
         default: return .generic
         }
+    }
+
+    private enum HostProvider: Equatable { case known(String), unsupported }
+
+    /// Mirrors SoundEditor's paste-time detection so a mismatched or hand-edited config
+    /// gets corrected here too, not just at the moment of typing. `nil` means "not a
+    /// recognizable share link" (a local playlist name or a `spotify:` URI already
+    /// specific to its own provider) -- the stored prefix is trusted in that case.
+    private func providerFromHost(_ text: String) -> HostProvider? {
+        if text.hasPrefix("spotify:") { return .known("spotify") }
+        guard let url = URL(string: text), let host = url.host?.lowercased(),
+              text.hasPrefix("http://") || text.hasPrefix("https://")
+        else { return nil }
+        if host.contains("music.apple.com") { return .known("appleMusic") }
+        if host.contains("open.spotify.com") { return .known("spotify") }
+        if host.contains("music.youtube.com") || host.contains("youtube.com") || host == "youtu.be" {
+            return .unsupported
+        }
+        return nil
     }
 
     private func escape(_ s: String) -> String {

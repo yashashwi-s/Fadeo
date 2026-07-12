@@ -26,6 +26,10 @@ struct SoundEditor: View {
     /// active, a half-typed URL would fire a real handoff to Music/Spotify mid-typing.
     @State private var linkDraft: String = ""
     @FocusState private var linkFieldFocused: Bool
+    /// Set when a pasted link is either unrecognized-but-plausibly-a-URL or from a
+    /// service Fadeo can't conduct (YouTube Music, etc.) -- shown instead of silently
+    /// committing it under whatever app the picker happened to be on.
+    @State private var linkImportError: String?
     @State private var showSavePrompt = false
     @State private var savePromptName = ""
 
@@ -311,7 +315,7 @@ struct SoundEditor: View {
                     .focused($linkFieldFocused)
                     .onSubmit { commitLinkDraft() }
                     .onChange(of: linkFieldFocused) { _, focused in
-                        if !focused { commitLinkDraft() }
+                        if focused { linkImportError = nil } else { commitLinkDraft() }
                     }
                 if onSaveSound != nil {
                     Button("Save…") {
@@ -323,7 +327,10 @@ struct SoundEditor: View {
                     .help("Name this link and keep it in your Sound Library for reuse in any workspace")
                 }
             }
-            if linkDraft != externalPlaylistText {
+            if let linkImportError {
+                Text(linkImportError)
+                    .font(.caption2).foregroundStyle(.red)
+            } else if linkDraft != externalPlaylistText {
                 Text("Press Return (or click away) to apply the link.")
                     .font(.caption2).foregroundStyle(.orange)
             }
@@ -341,8 +348,36 @@ struct SoundEditor: View {
     private func commitLinkDraft() {
         let trimmed = linkDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         linkDraft = trimmed
+        linkImportError = nil
         guard trimmed != externalPlaylistText else { return }
-        rebuildExternal(provider: externalProvider, playlist: trimmed)
+        // A pasted link names its own service in its host -- trust that over whatever the
+        // App picker happens to be set to, rather than silently conducting a Spotify (or
+        // unsupported YouTube Music) link through Music.app, which just plays garbage.
+        switch detectedProvider(for: trimmed) {
+        case .known(let provider):
+            rebuildExternal(provider: provider, playlist: trimmed)
+        case .unsupported(let name):
+            linkImportError = "\(name) links can't be conducted directly -- only Apple Music and Spotify are supported. Paste a music.apple.com or open.spotify.com link (or a spotify: URI) instead."
+        case nil:
+            rebuildExternal(provider: externalProvider, playlist: trimmed)
+        }
+    }
+
+    private enum DetectedLinkProvider { case known(String), unsupported(String) }
+
+    /// Host-sniffs a pasted share link/URI. `nil` means "not a recognizable link" (a bare
+    /// local playlist name, most likely), so the manually-selected App picker still
+    /// applies -- there's no host to contradict it.
+    private func detectedProvider(for text: String) -> DetectedLinkProvider? {
+        if text.hasPrefix("spotify:") { return .known("spotify") }
+        guard let url = URL(string: text), let host = url.host?.lowercased(),
+              text.hasPrefix("http://") || text.hasPrefix("https://")
+        else { return nil }
+        if host.contains("music.apple.com") { return .known("appleMusic") }
+        if host.contains("open.spotify.com") { return .known("spotify") }
+        if host.contains("music.youtube.com") { return .unsupported("YouTube Music") }
+        if host.contains("youtube.com") || host == "youtu.be" { return .unsupported("YouTube") }
+        return nil
     }
 
     private var shareLinkExplanation: String {
