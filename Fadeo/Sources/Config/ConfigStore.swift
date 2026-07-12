@@ -57,8 +57,18 @@ final class ConfigStore: ObservableObject {
             lastError = nil
             lastLoaded = Date()
         } catch {
-            // Keep the last-good config; report the problem.
+            // Keep the last-good config; report the problem. Notify once on the transition
+            // into a bad state (not on every reload while it stays bad), since a direct edit
+            // to config.yaml that fails to parse is otherwise silent.
+            let wasGood = lastError == nil
             lastError = "config.yaml invalid, keeping last good version. \(error.localizedDescription)"
+            if wasGood {
+                Notifier.shared.notify(
+                    title: "Fadeo: config.yaml didn't parse",
+                    body: "Your last edit had an error. Fadeo kept the previous good config. Open Preferences to see details.",
+                    id: "fadeo.config.error"
+                )
+            }
         }
     }
 

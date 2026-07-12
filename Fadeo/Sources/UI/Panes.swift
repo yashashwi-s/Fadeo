@@ -173,6 +173,7 @@ struct PreferencesPane: View {
     @EnvironmentObject var controller: AppController
     @State private var launchAtLogin = LoginItem.isEnabled
     @State private var diagnosticsOptIn = DiagnosticsPreference.isEnabled
+    @State private var notificationsEnabled = NotificationsPreference.isEnabled
 
     var body: some View {
         ScrollView {
@@ -183,11 +184,13 @@ struct PreferencesPane: View {
                             if !LoginItem.setEnabled(v) { launchAtLogin = LoginItem.isEnabled }
                         }
                     Toggle("Pause automation", isOn: $controller.automationPaused)
+                    Toggle("Notifications (updates, config errors)", isOn: $notificationsEnabled)
+                        .onChange(of: notificationsEnabled) { _, v in NotificationsPreference.isEnabled = v }
                 }
                 Card(title: "Privacy") {
                     Toggle("Share anonymous usage data", isOn: $diagnosticsOptIn)
                         .onChange(of: diagnosticsOptIn) { _, v in DiagnosticsPreference.isEnabled = v }
-                    Text("A coarse summary only: session count, days used, workspace count, switches, and total active time. Never workspace names, app names, or file paths. Local usage tracking (Usage tab) always runs regardless of this setting. There's no server to send it to yet, so this toggle doesn't transmit anything today — it just records your preference for when that exists.")
+                    Text("A coarse summary only: session count, days used, workspace count, switches, and total active time. Never workspace names, app names, or file paths. Local usage tracking (Usage tab) always runs regardless of this setting; only this coarse summary is sent, at most once a day.")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
                 Card(title: "Configuration") {

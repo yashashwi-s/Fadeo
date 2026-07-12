@@ -26,6 +26,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             self?.updatePolicy()
         }
+
+        // Local notifications + the once-a-day update check, after launch. Both are plain
+        // Apple APIs / a URLSession call -- unlike Sparkle they don't touch the window.
+        DispatchQueue.main.async {
+            Notifier.shared.start()
+            UpdateChecker.checkIfDue()
+        }
     }
 
     @objc private func windowsChanged() {
