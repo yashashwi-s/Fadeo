@@ -12,14 +12,14 @@ enum DiagnosticsUploader {
     private static let lastSentKey = "fadeo.diagnostics.lastSentAt"
     private static let minInterval: TimeInterval = 20 * 60 * 60
 
-    static func uploadIfDue(summary: ShareableUsageSummary) {
+    static func uploadIfDue(summary: ShareableUsageSummary, shape: ConfigUsageShape) {
         guard DiagnosticsPreference.isEnabled else { return }
         if let lastSent = UserDefaults.standard.object(forKey: lastSentKey) as? Date,
            Date().timeIntervalSince(lastSent) < minInterval {
             return
         }
 
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "installID": summary.installID,
             "daysSinceFirstLaunch": summary.daysSinceFirstLaunch,
             "sessionCount": summary.sessionCount,
@@ -28,7 +28,17 @@ enum DiagnosticsUploader {
             "totalActiveSeconds": summary.totalActiveSeconds,
             "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
             "osVersion": ProcessInfo.processInfo.operatingSystemVersionString,
+            // Feature-adoption shape (privacy-safe counts only, see ConfigUsageShape).
+            "enabledWorkspaceCount": shape.enabledCount,
+            "overrideWorkspaceCount": shape.overrideCount,
+            "sourceKinds": shape.sourceKinds,
+            "triggerKinds": shape.triggerKinds,
+            "presets": shape.presets,
+            "fallbackMode": shape.fallbackMode,
+            // Conversion + satisfaction.
+            "licensed": isLicensed(),
         ]
+        if let rating = RatingPreference.value { payload["rating"] = rating }
         guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return }
 
         var request = URLRequest(url: endpoint)
@@ -42,5 +52,12 @@ enum DiagnosticsUploader {
         // temporarily offline Mac from turning into a retry-every-launch loop.
         UserDefaults.standard.set(Date(), forKey: lastSentKey)
         URLSession.shared.dataTask(with: request).resume()
+    }
+
+    /// Mirrors LicenseManager's stored key. Read directly (rather than threaded through
+    /// AppController) to keep this uploader self-contained; it only needs a boolean.
+    private static func isLicensed() -> Bool {
+        guard let key = UserDefaults.standard.string(forKey: "fadeo.license.key") else { return false }
+        return License.verify(key) != nil
     }
 }

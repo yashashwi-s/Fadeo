@@ -217,49 +217,134 @@ struct PreferencesPane: View {
 
 struct AboutPane: View {
     @EnvironmentObject var licenseManager: LicenseManager
+    @EnvironmentObject var controller: AppController
     @State private var licenseKeyInput = ""
     @State private var showKeyEntry = false
+    @State private var rating = RatingPreference.value ?? 0
+    @State private var feedbackText = ""
+    @State private var sendState: SendState = .idle
 
+    private enum SendState: Equatable { case idle, sending, sent, failed }
+
+    private var shortVersion: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0" }
     private var version: String {
-        let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
         let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
-        return "\(v) (\(b))"
+        return "\(shortVersion) (\(b))"
     }
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 14) {
-                Image("AppLogo").resizable().scaledToFit().frame(width: 96, height: 96)
-                    .clipShape(RoundedRectangle(cornerRadius: 20))
-                Text("Fadeo").font(.largeTitle.weight(.semibold))
-                Text("The right sound for what you're doing.").foregroundStyle(.secondary)
-                Text("Version \(version)").font(.caption).foregroundStyle(.secondary)
-                Divider().frame(width: 220).padding(.vertical, 6)
-                VStack(spacing: 4) {
-                    Text("Open source · GPLv3").font(.callout.weight(.medium))
-                    Text("Fully functional. A gentle reminder appears until licensed, never a lockout.")
-                        .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: 360)
-
-                Divider().frame(width: 220).padding(.vertical, 6)
-                licenseSection
-
-                Divider().frame(width: 220).padding(.vertical, 6)
-                feedbackSection
+            VStack(spacing: 16) {
+                header
+                Card(title: "License") { licenseSection }
+                Card(title: "Rate & feedback") { ratingSection }
+                Card(title: "Updates") { updatesSection }
+                Card(title: "About") { aboutLinksSection }
             }
+            .frame(maxWidth: 460)
             .frame(maxWidth: .infinity)
-            .padding(30)
+            .padding(24)
         }
         .navigationTitle("About")
     }
 
-    private var feedbackSection: some View {
-        VStack(spacing: 6) {
-            Button("Send Feedback or Report a Bug") { openFeedbackEmail() }
-                .buttonStyle(.bordered)
-            Text("Opens your email client, addressed to me directly.")
+    private var header: some View {
+        VStack(spacing: 8) {
+            Image("AppLogo").resizable().scaledToFit().frame(width: 84, height: 84)
+                .clipShape(RoundedRectangle(cornerRadius: 18))
+            Text("Fadeo").font(.title.weight(.semibold))
+            Text("The right sound for what you're doing.").font(.callout).foregroundStyle(.secondary)
+            Text("Version \(version)").font(.caption).foregroundStyle(.tertiary)
+        }
+        .padding(.top, 4)
+    }
+
+    // MARK: Rating + feedback
+
+    private var ratingSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                ForEach(1...5, id: \.self) { i in
+                    Image(systemName: i <= rating ? "star.fill" : "star")
+                        .font(.title3)
+                        .foregroundStyle(i <= rating ? Color.yellow : Color.secondary)
+                        .onTapGesture { rating = i; RatingPreference.value = i }
+                }
+                if rating > 0 {
+                    Text("Thanks!").font(.caption).foregroundStyle(.secondary).padding(.leading, 4)
+                }
+            }
+            TextEditor(text: $feedbackText)
+                .font(.callout)
+                .frame(height: 72)
+                .padding(6)
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
+                .overlay(alignment: .topLeading) {
+                    if feedbackText.isEmpty {
+                        Text("Anything you'd like me to know? Bugs, ideas, a texture you want…")
+                            .font(.callout).foregroundStyle(.tertiary).padding(.horizontal, 11).padding(.vertical, 14)
+                            .allowsHitTesting(false)
+                    }
+                }
+            HStack {
+                Button(sendState == .sending ? "Sending…" : "Send feedback") { sendFeedback() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(sendState == .sending || (feedbackText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && rating == 0))
+                switch sendState {
+                case .sent: Label("Sent, thank you", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green)
+                case .failed: Label("Couldn't send. Try email below.", systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+                default: EmptyView()
+                }
+            }
+            Text("Sent anonymously (a random install id, no personal data) so I can see it and improve Fadeo.")
                 .font(.caption2).foregroundStyle(.tertiary)
+        }
+    }
+
+    private func sendFeedback() {
+        sendState = .sending
+        let ratingToSend = rating > 0 ? rating : nil
+        FeedbackSender.send(installID: controller.usageStore.stats.installID,
+                            rating: ratingToSend,
+                            text: feedbackText.trimmingCharacters(in: .whitespacesAndNewlines)) { ok in
+            sendState = ok ? .sent : .failed
+            if ok { feedbackText = "" }
+        }
+    }
+
+    // MARK: Updates
+
+    private var updatesSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("You're on \(shortVersion). Fadeo checks for updates daily and notifies you.")
+                .font(.callout)
+            Text("Installed via Homebrew? Update with brew upgrade --cask fadeo. Otherwise download the latest from the releases page.")
+                .font(.caption).foregroundStyle(.secondary)
+            Button("View releases") {
+                if let url = URL(string: "https://github.com/yashashwi-s/Fadeo/releases/latest") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+            .buttonStyle(.bordered).controlSize(.small)
+        }
+    }
+
+    // MARK: About / links
+
+    private var aboutLinksSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Open source · GPLv3").font(.callout.weight(.medium))
+            Text("Fully functional. A gentle reminder appears until licensed, never a lockout.")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 14) {
+                Button("Source on GitHub") {
+                    if let url = URL(string: "https://github.com/yashashwi-s/Fadeo") { NSWorkspace.shared.open(url) }
+                }
+                .buttonStyle(.link)
+                Button("Email me") { openFeedbackEmail() }
+                    .buttonStyle(.link)
+            }
+            .font(.caption)
         }
     }
 
@@ -267,16 +352,14 @@ struct AboutPane: View {
         var components = URLComponents()
         components.scheme = "mailto"
         components.path = "fadeo.puremac@gmail.com"
-        components.queryItems = [
-            URLQueryItem(name: "subject", value: "Fadeo feedback (v\(version))"),
-        ]
-        if let url = components.url {
-            NSWorkspace.shared.open(url)
-        }
+        components.queryItems = [URLQueryItem(name: "subject", value: "Fadeo feedback (v\(shortVersion))")]
+        if let url = components.url { NSWorkspace.shared.open(url) }
     }
 
+    // MARK: License
+
     private var licenseSection: some View {
-        VStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: 10) {
             switch licenseManager.status {
             case .licensed:
                 Label("Licensed · thank you", systemImage: "checkmark.seal.fill")
@@ -285,18 +368,17 @@ struct AboutPane: View {
                 Text("Trial · \(daysRemaining) day\(daysRemaining == 1 ? "" : "s") remaining")
                     .font(.callout).foregroundStyle(.secondary)
             case .trialExpired:
-                Text("Trial ended").font(.callout).foregroundStyle(.secondary)
+                Text("Trial ended · Fadeo keeps working").font(.callout).foregroundStyle(.secondary)
             }
 
             if !licenseManager.isLicensed {
                 if showKeyEntry {
-                    VStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 8) {
                         TextField("FADEO1.\u{2026}", text: $licenseKeyInput)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(.callout, design: .monospaced))
-                            .frame(width: 280)
                         if let error = licenseManager.licenseError {
-                            Text(error).font(.caption).foregroundStyle(.red).frame(maxWidth: 280)
+                            Text(error).font(.caption).foregroundStyle(.red)
                         }
                         HStack {
                             Button("Cancel") { showKeyEntry = false; licenseKeyInput = "" }
@@ -307,10 +389,8 @@ struct AboutPane: View {
                     }
                 } else {
                     HStack(spacing: 10) {
-                        Button("Support Fadeo") {
-                            if let url = URL(string: "https://puremac.yashashwi.me/fadeo") {
-                                NSWorkspace.shared.open(url)
-                            }
+                        Button("Support Fadeo ($2)") {
+                            if let url = URL(string: "https://puremac.yashashwi.me/fadeo") { NSWorkspace.shared.open(url) }
                         }
                         .buttonStyle(.borderedProminent)
                         Button("Enter License Key") { showKeyEntry = true }

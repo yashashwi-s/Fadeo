@@ -153,7 +153,8 @@ final class AppController: ObservableObject {
 
         reconcileSensors()
         evaluate()
-        DiagnosticsUploader.uploadIfDue(summary: usageStore.stats.shareableSummary)
+        DiagnosticsUploader.uploadIfDue(summary: usageStore.stats.shareableSummary,
+                                        shape: configStore.config.diagnosticsShape)
 
         // `queue: nil` is deliberate, not the default-ish `.main`: with an explicit queue,
         // NotificationCenter *enqueues* the block onto it asynchronously rather than
