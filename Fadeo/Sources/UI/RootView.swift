@@ -33,13 +33,9 @@ enum Pane: String, CaseIterable, Identifiable {
 struct RootView: View {
     @EnvironmentObject var controller: AppController
     @EnvironmentObject var licenseManager: LicenseManager
-    // Owned by FadeoApp (not local @State) so the Window menu's "Show Sidebar" command --
-    // a hard reset to .all, not dependent on the toolbar toggle -- can reach the same
-    // value. See SidebarState.swift for why that second path exists.
-    @EnvironmentObject var sidebarState: SidebarState
     // Dev/screenshot-verification hook: FADEO_INITIAL_PANE=<rawValue> jumps straight to a
     // pane at launch without needing UI-click automation. Never set in the shipped app.
-    @State private var selection: Pane = Pane(rawValue: ProcessInfo.processInfo.environment["FADEO_INITIAL_PANE"] ?? "") ?? .now
+    @State private var selection: Pane? = Pane(rawValue: ProcessInfo.processInfo.environment["FADEO_INITIAL_PANE"] ?? "")
     @State private var showOnboarding = !OnboardingSheet.hasCompleted
     @State private var showNag = false
 
@@ -55,32 +51,54 @@ struct RootView: View {
             }
     }
 
+    // A plain HStack shell, deliberately NOT a NavigationSplitView: the sidebar is a
+    // fixed-width column that can never be collapsed (no toolbar toggle, no draggable
+    // divider) and there is no autosaved split geometry to corrupt. The detail is wrapped
+    // in a NavigationStack purely so each pane's `.navigationTitle(...)` still renders in
+    // the titlebar (the app has no push navigation). This replaced a NavigationSplitView
+    // whose inherent collapse behavior and beta-buggy height computation caused the
+    // sidebar to vanish and the panes' ScrollViews to break on window resize.
     private var content: some View {
-        NavigationSplitView(columnVisibility: $sidebarState.visibility) {
-            List(Pane.allCases, selection: $selection) { pane in
-                NavigationLink(value: pane) {
-                    Label(pane.rawValue, systemImage: pane.systemImage)
-                }
+        HStack(spacing: 0) {
+            sidebar.frame(width: 216)
+            Divider()
+            NavigationStack {
+                detail
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .navigationSplitViewColumnWidth(min: 200, ideal: 210, max: 240)
-            .safeAreaInset(edge: .bottom) { sidebarFooter }
-        } detail: {
-            Group {
-                switch selection {
-                case .now: NowPane()
-                case .workspaces: WorkspacesPane()
-                case .soundLibrary: SoundLibraryPane()
-                case .precedence: PrecedencePane()
-                case .triggers: TriggersPane()
-                case .usage: UsagePane(usageStore: controller.usageStore)
-                case .advanced: AdvancedPane()
-                case .preferences: PreferencesPane()
-                case .about: AboutPane()
-                }
-            }
-            .frame(minWidth: 560, minHeight: 520)
         }
-        .frame(minWidth: 820, minHeight: 560)
+        // minWidth must clear the widest pane's own minimum so nothing clips at the right
+        // edge: sidebar 216 + Workspaces' list (min 220) + its editor (min 460) + dividers
+        // ~= 900. Paired with .windowResizability(.contentSize) in FadeoApp, this becomes a
+        // hard window floor; the detail's maxWidth .infinity keeps it freely growable above.
+        .frame(minWidth: 900, idealWidth: 1120, minHeight: 600, idealHeight: 760)
+    }
+
+    private var sidebar: some View {
+        VStack(spacing: 0) {
+            List(selection: $selection) {
+                ForEach(Pane.allCases) { pane in
+                    Label(pane.rawValue, systemImage: pane.systemImage).tag(pane)
+                }
+            }
+            .listStyle(.sidebar)
+            sidebarFooter
+        }
+    }
+
+    @ViewBuilder
+    private var detail: some View {
+        switch selection ?? .now {
+        case .now: NowPane()
+        case .workspaces: WorkspacesPane()
+        case .soundLibrary: SoundLibraryPane()
+        case .precedence: PrecedencePane()
+        case .triggers: TriggersPane()
+        case .usage: UsagePane(usageStore: controller.usageStore)
+        case .advanced: AdvancedPane()
+        case .preferences: PreferencesPane()
+        case .about: AboutPane()
+        }
     }
 
     private var sidebarFooter: some View {

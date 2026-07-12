@@ -7,7 +7,6 @@ struct FadeoApp: App {
     @StateObject private var controller: AppController
     @StateObject private var licenseManager = LicenseManager()
     @StateObject private var softwareUpdater = SoftwareUpdater()
-    @StateObject private var sidebarState = SidebarState()
 
     init() {
         // One ConfigStore, shared by the controller and the UI.
@@ -23,26 +22,14 @@ struct FadeoApp: App {
                 .environmentObject(configStore)
                 .environmentObject(licenseManager)
                 .environmentObject(softwareUpdater)
-                .environmentObject(sidebarState)
         }
-        // .contentSize (the previous setting) ties window resizing tightly to the
-        // content's intrinsic size, which doesn't mix well with a NavigationSplitView
-        // whose columns are themselves user-resizable -- a likely contributor to a
-        // resize-triggered layout corruption reported live (scrolling breaking, stray
-        // content bleeding through at the window edge). .automatic is the standard,
-        // well-tested choice for a freely resizable sidebar-based window.
-        .windowResizability(.automatic)
-        .commands {
-            CommandGroup(replacing: .newItem) {}  // no File ▸ New
-            // A hard reset to .all, independent of the toolbar's own sidebar toggle --
-            // that button has been unreliable in practice (confirmed live: the sidebar
-            // could get stuck hidden with no on-screen way back). Always reachable via
-            // the View menu and its shortcut even if every other control misbehaves.
-            CommandGroup(after: .sidebar) {
-                Button("Show Sidebar") { sidebarState.forceShow() }
-                    .keyboardShortcut("0", modifiers: [.command, .option])
-            }
-        }
+        // .contentSize now that the shell is a deterministic HStack (not the old
+        // NavigationSplitView whose buggy intrinsic sizing this used to fight): it makes
+        // the window's minimum equal RootView's content minimum (~900pt), so the window
+        // can never be dragged narrower than the content and clip it. The detail's
+        // maxWidth .infinity leaves the maximum unbounded, so it still grows freely.
+        .windowResizability(.contentSize)
+        .commands { CommandGroup(replacing: .newItem) {} }  // no File ▸ New
 
         MenuBarExtra {
             MenuBarContent()
