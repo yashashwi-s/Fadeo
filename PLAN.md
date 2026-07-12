@@ -400,9 +400,9 @@ Only actuators referenced by active workspaces are instantiated.
 | **Sound Library** | connect Spotify/Apple Music; add local files/folders; ambient presets; preview |
 | **Precedence & Transitions** | drag-order the **tiebreak chain**; fallback behavior; global fades/delays/dwell; transition style + **fade-curve editor**; **Conflict Simulator** |
 | **Triggers** | enable/disable sensors; define "meeting" (cam and/or mic); name your Spaces |
-| **Preferences** | general; launch at login (`SMAppService`); updates (Sparkle); **Energy dashboard** (live CPU/events — the efficiency proof); permissions status & re-request; backup/export |
+| **Preferences** | general; launch at login (`SMAppService`); **Energy dashboard** (live CPU/events — the efficiency proof); permissions status & re-request; backup/export |
 | **Advanced** | raw **YAML editor** (two-way); import/export; rule inspector; logs |
-| **About / License** | logo; version; license status; buy/activate; OSS repo link; the soft nag |
+| **About / License** | logo; version; license status; buy/activate; OSS repo link; the soft nag; **Sparkle updates** (Check Now + automatic-check toggle) |
 
 **Menu-bar companion (`MenuBarExtra`) — simple yet genuinely useful:**
 current workspace + what's playing · play/pause + volume slider · **snooze automation**
@@ -540,7 +540,11 @@ forever.** Payment funds development and clears the nag; it never unlocks functi
   **diagnostics ingestion** endpoint.
 - **Signing:** Developer ID Application, **hardened runtime**, **non-sandboxed**.
 - **Notarize:** `notarytool` submit → staple (no private-API scan — confirmed safe).
-- **Auto-update:** [Sparkle](https://sparkle-project.org), EdDSA-signed appcast on the hub.
+- **Auto-update:** [Sparkle](https://sparkle-project.org) ✅ wired (`SoftwareUpdater.swift`,
+  `SPUStandardUpdaterController`); EdDSA-signed appcast published as a GitHub release asset
+  (`scripts/sign-appcast.swift`, `release.yml`), fed via GitHub's stable "latest release"
+  alias rather than hosted on the hub. Works ad-hoc signed — unrelated to Developer ID.
+  Awaiting a `SPARKLE_PRIVATE_KEY` repo secret before the CI signing step actually runs.
 - **Bundle:** `mediaremote-adapter` framework + `.pl` + ambient presets in `Resources/`.
 - Site work (storefront, license service, diagnostics dashboard) is **its own track**,
   post-M5 for the app; scoped separately. Recorded here so the app's licensing/diagnostics
@@ -582,9 +586,9 @@ test loop; OS glue is thin and swappable.
 | **M2** | **Precedence engine** (4 bands + tiebreak chain) + **Conflict Simulator**; `ExternalConductor` (MediaRemote + Spotify/Music) | the deep customization + conducting real players |
 | **M3** ✅ | Remaining v1 sensors: Space (CGS shim) · Meeting (cam/mic) · Focus/Schedule (FSEvents + boundary timer). Also: real lazy sensor activation (a sensor starts only if an enabled workspace's `match` needs its fields) | all four triggers live |
 | **M4** ✅ | Full **Workspace editor UI** + Sound Library + Precedence UI + Conflict Simulator + Triggers UI (live sensor status) + two-way YAML editor | both halves of the customizability pillar |
-| **M5** ✅ (packaging still deferred) | Done: **permissions/onboarding** (one-screen, real permission surface, includes the diagnostics opt-in) · **energy dashboard** (self-reported RSS + active sensor count) · **usage statistics** (local always-on tracking of time/switches per workspace, a Usage pane, and an opt-in coarse shareable summary) · **diagnostics now actually transmit** (`DiagnosticsUploader.swift` → the PureMac hub's ingestion endpoint + admin dashboard) · **resume-across-quit** (internal files and Apple Music/Spotify pick up at the exact position after a full quit, not just a brief pause) · **licensing is live** (`LicenseManager`/`NagSheet` wired into `RootView`, 14-day trial → soft nag, Ed25519 offline verification, Gumroad + Stripe-wired checkout, free-giveaway generator with email delivery + 7-day activation expiry) · real app icons throughout · searchable app picker · reset-to-defaults in Precedence. **Still deferred, by user decision**: Sparkle updater, notarization/signing (needs a paid Apple Developer ID — a real purchase/enrollment decision), brand/logo redesign in progress by the user | core app AND monetization are both feature-complete; packaging/distribution is the remaining work |
+| **M5** ✅ (packaging still deferred) | Done: **permissions/onboarding** (one-screen, real permission surface, includes the diagnostics opt-in) · **energy dashboard** (self-reported RSS + active sensor count) · **usage statistics** (local always-on tracking of time/switches per workspace, a Usage pane, and an opt-in coarse shareable summary) · **diagnostics now actually transmit** (`DiagnosticsUploader.swift` → the PureMac hub's ingestion endpoint + admin dashboard) · **resume-across-quit** (internal files and Apple Music/Spotify pick up at the exact position after a full quit, not just a brief pause) · **licensing is live** (`LicenseManager`/`NagSheet` wired into `RootView`, 14-day trial → soft nag, Ed25519 offline verification, Gumroad + Stripe-wired checkout, free-giveaway generator with email delivery + 7-day activation expiry) · **Sparkle auto-update ✅** (works ad-hoc signed, no Developer ID needed) · real app icons throughout · searchable app picker · reset-to-defaults in Precedence. **Still deferred, by user decision**: notarization/signing (needs a paid Apple Developer ID — a real purchase/enrollment decision), brand/logo redesign in progress by the user | core app, monetization, AND auto-update are all feature-complete; packaging/distribution is the remaining work |
 | Later | Idle · browser URL · network/SSID · battery · headphones · calendar sensors; preset library; per-output-device routing; workspace import/share | breadth |
-| Site | **PureMac hub** (`puremac.yashashwi.me/fadeo`): storefront, download + Sparkle appcast, purchase, capped free-license generator, **diagnostics dashboard ✅** | remaining pieces (Sparkle appcast, download) blocked on Developer ID + notarization |
+| Site | **PureMac hub** (`puremac.yashashwi.me/fadeo`): storefront, download, purchase, capped free-license generator, **diagnostics dashboard ✅**. Sparkle appcast is instead a GitHub release asset (§15), not hub-hosted | remaining piece (the download itself) blocked on Developer ID + notarization |
 
 ---
 
