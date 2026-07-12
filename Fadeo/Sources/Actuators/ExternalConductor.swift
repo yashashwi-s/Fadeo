@@ -36,15 +36,21 @@ import FadeoCore
 ///   external:appleMusic:playlist:<url>     open a music.apple.com share link
 ///   external:spotify:command               same, explicitly through Spotify
 ///   external:spotify:playlist:<uri-or-url> a spotify: URI (AppleScript) or open.spotify.com link
+///   external:browser:playlist:<url>        open a web link (YouTube, any page) in the
+///                                          default browser; pause/resume via generic transport
 final class ExternalConductor {
     private enum Target {
         case generic
         case appleMusic(playlist: String?)
         case spotify(playlist: String?)
+        /// A web link opened in the default browser (YouTube, YouTube Music, any page).
+        /// Fadeo can't conduct a browser tab natively, so control is best-effort via the
+        /// generic system Now Playing transport (which browser media registers with).
+        case browser(url: String?)
 
         var appName: String? {
             switch self {
-            case .generic: return nil
+            case .generic, .browser: return nil
             case .appleMusic: return "Music"
             case .spotify: return "Spotify"
             }
@@ -52,12 +58,16 @@ final class ExternalConductor {
 
         var bundleID: String? {
             switch self {
-            case .generic: return nil
+            case .generic, .browser: return nil
             case .appleMusic: return "com.apple.Music"
             case .spotify: return "com.spotify.client"
             }
         }
     }
+
+    /// The browser URL currently cued, so a repeat `.start`/`.crossfade` for the same link
+    /// doesn't spawn a duplicate tab. Cleared on stop. Touched only on the work queue.
+    private var openedBrowserURL: String?
 
     private let mediaRemote = MediaRemoteBridge()
     private(set) var state: AudioState = .silent
@@ -121,7 +131,10 @@ final class ExternalConductor {
             // Capture which app we were conducting BEFORE clearing state.
             let target = parse(state.source ?? "")
             state = .silent
-            work.async { [weak self] in self?.performStop(target: target) }
+            work.async { [weak self] in
+                self?.openedBrowserURL = nil   // a real stop: next start reopens the tab
+                self?.performStop(target: target)
+            }
         }
     }
 
@@ -147,7 +160,7 @@ final class ExternalConductor {
             } else {
                 mediaRemote.pause()
             }
-        case .generic:
+        case .generic, .browser:
             mediaRemote.pause()
         }
     }
@@ -178,7 +191,7 @@ final class ExternalConductor {
                 guard isCurrent(gen) else { return }
             }
             AppleScriptRunner.run(#"tell application "\#(appName)" to play"#)
-        case .generic:
+        case .generic, .browser:
             mediaRemote.play()
         }
         performSetVolume(volume, target: target)
@@ -190,6 +203,20 @@ final class ExternalConductor {
         switch target {
         case .generic:
             mediaRemote.play()
+
+        case .browser(let url):
+            // Open the link in the default browser to start it, once. NSWorkspace.open
+            // brings the browser forward -- that focus change IS the point here ("play in
+            // browser"), and browsers block autoplay in background tabs anyway. A repeat
+            // start for the same link reuses the tab rather than spawning a new one; if it
+            // was paused, a bare play nudge (below) resumes without reopening.
+            guard let url, let u = shareLinkURL(url) else { mediaRemote.play(); return }
+            if openedBrowserURL == url {
+                mediaRemote.play()
+            } else {
+                openedBrowserURL = url
+                DispatchQueue.main.async { NSWorkspace.shared.open(u) }
+            }
 
         case .appleMusic(let playlist), .spotify(let playlist):
             guard let appName = target.appName, let bundleID = target.bundleID else { return }
@@ -331,7 +358,7 @@ final class ExternalConductor {
     private func performSetVolume(_ volume: Double, target: Target) {
         let percent = Int((max(0, min(1, volume)) * 100).rounded())
         switch target {
-        case .generic:
+        case .generic, .browser:
             break   // no addressable app to set a baseline on
         case .appleMusic:
             AppleScriptRunner.run(#"tell application "Music" to set sound volume to \#(percent)"#)
@@ -378,34 +405,31 @@ final class ExternalConductor {
         // live: a raw catalog id where a track name should be).
         if let playlist, let override = providerFromHost(playlist) {
             switch override {
-            case .known("spotify"): return .spotify(playlist: playlist)
-            case .known: return .appleMusic(playlist: playlist)
-            case .unsupported: return .generic   // e.g. YouTube Music -- nothing here can conduct it
+            case "spotify": return .spotify(playlist: playlist)
+            case "browser": return .browser(url: playlist)
+            default: return .appleMusic(playlist: playlist)
             }
         }
         switch parts[1] {
         case "appleMusic": return .appleMusic(playlist: playlist)
         case "spotify": return .spotify(playlist: playlist)
+        case "browser": return .browser(url: playlist)
         default: return .generic
         }
     }
 
-    private enum HostProvider: Equatable { case known(String), unsupported }
-
     /// Mirrors SoundEditor's paste-time detection so a mismatched or hand-edited config
     /// gets corrected here too, not just at the moment of typing. `nil` means "not a
-    /// recognizable share link" (a local playlist name or a `spotify:` URI already
-    /// specific to its own provider) -- the stored prefix is trusted in that case.
-    private func providerFromHost(_ text: String) -> HostProvider? {
-        if text.hasPrefix("spotify:") { return .known("spotify") }
+    /// recognizable link" (a local playlist name or a `spotify:` URI already specific to
+    /// its own provider) -- the stored prefix is trusted in that case.
+    private func providerFromHost(_ text: String) -> String? {
+        if text.hasPrefix("spotify:") { return "spotify" }
         guard let url = URL(string: text), let host = url.host?.lowercased(),
               text.hasPrefix("http://") || text.hasPrefix("https://")
         else { return nil }
-        if host.contains("music.apple.com") { return .known("appleMusic") }
-        if host.contains("open.spotify.com") { return .known("spotify") }
-        if host.contains("music.youtube.com") || host.contains("youtube.com") || host == "youtu.be" {
-            return .unsupported
-        }
+        if host.contains("music.apple.com") { return "appleMusic" }
+        if host.contains("open.spotify.com") { return "spotify" }
+        if host.contains("youtube.com") || host == "youtu.be" { return "browser" }
         return nil
     }
 
@@ -433,8 +457,8 @@ final class ExternalConductor {
                     .queryItems?.contains(where: { $0.name == "i" }) ?? false
             case .spotify:
                 return url.path.split(separator: "/").map(String.init).contains("track")
-            case .generic:
-                return false
+            case .generic, .browser:
+                return false   // browser links don't drive Music/Spotify repeat-one
             }
         }
         if case .spotify = target { return playlist.hasPrefix("spotify:track:") }

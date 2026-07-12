@@ -26,10 +26,6 @@ struct SoundEditor: View {
     /// active, a half-typed URL would fire a real handoff to Music/Spotify mid-typing.
     @State private var linkDraft: String = ""
     @FocusState private var linkFieldFocused: Bool
-    /// Set when a pasted link is either unrecognized-but-plausibly-a-URL or from a
-    /// service Fadeo can't conduct (YouTube Music, etc.) -- shown instead of silently
-    /// committing it under whatever app the picker happened to be on.
-    @State private var linkImportError: String?
     @State private var showSavePrompt = false
     @State private var savePromptName = ""
 
@@ -59,7 +55,7 @@ struct SoundEditor: View {
             case .file: return "A file"
             case .folder: return "A folder"
             case .playlist: return "A playlist (curated)"
-            case .external: return "Spotify / Apple Music"
+            case .external: return "Spotify / Apple Music / Browser"
             case .silence: return "Nothing (pause/stop)"
             }
         }
@@ -305,17 +301,20 @@ struct SoundEditor: View {
             )) {
                 Text("Apple Music").tag("appleMusic")
                 Text("Spotify").tag("spotify")
+                Text("Browser (YouTube, web)").tag("browser")
             }
             .labelsHidden()
 
             HStack(spacing: 6) {
-                TextField("Playlist name, a spotify: URI, or a share link. Leave empty to just play/pause",
+                TextField(externalProvider == "browser"
+                          ? "A link to open in your browser (YouTube, YouTube Music, any web page)"
+                          : "Playlist name, a spotify: URI, or a share link. Leave empty to just play/pause",
                           text: $linkDraft)
                     .textFieldStyle(.roundedBorder)
                     .focused($linkFieldFocused)
                     .onSubmit { commitLinkDraft() }
                     .onChange(of: linkFieldFocused) { _, focused in
-                        if focused { linkImportError = nil } else { commitLinkDraft() }
+                        if !focused { commitLinkDraft() }
                     }
                 if onSaveSound != nil {
                     Button("Save…") {
@@ -327,10 +326,7 @@ struct SoundEditor: View {
                     .help("Name this link and keep it in your Sound Library for reuse in any workspace")
                 }
             }
-            if let linkImportError {
-                Text(linkImportError)
-                    .font(.caption2).foregroundStyle(.red)
-            } else if linkDraft != externalPlaylistText {
+            if linkDraft != externalPlaylistText {
                 Text("Press Return (or click away) to apply the link.")
                     .font(.caption2).foregroundStyle(.orange)
             }
@@ -348,7 +344,6 @@ struct SoundEditor: View {
     private func commitLinkDraft() {
         let trimmed = linkDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         linkDraft = trimmed
-        linkImportError = nil
         guard trimmed != externalPlaylistText else { return }
         // A pasted link names its own service in its host -- trust that over whatever the
         // App picker happens to be set to, rather than silently conducting a Spotify (or
@@ -356,18 +351,18 @@ struct SoundEditor: View {
         switch detectedProvider(for: trimmed) {
         case .known(let provider):
             rebuildExternal(provider: provider, playlist: trimmed)
-        case .unsupported(let name):
-            linkImportError = "\(name) links can't be conducted directly -- only Apple Music and Spotify are supported. Paste a music.apple.com or open.spotify.com link (or a spotify: URI) instead."
         case nil:
             rebuildExternal(provider: externalProvider, playlist: trimmed)
         }
     }
 
-    private enum DetectedLinkProvider { case known(String), unsupported(String) }
+    private enum DetectedLinkProvider { case known(String) }
 
-    /// Host-sniffs a pasted share link/URI. `nil` means "not a recognizable link" (a bare
-    /// local playlist name, most likely), so the manually-selected App picker still
-    /// applies -- there's no host to contradict it.
+    /// Host-sniffs a pasted share link/URI. `nil` means "not a recognizable music-service
+    /// link" (a bare local playlist name, or a plain web link), so the manually-selected
+    /// App picker still applies -- there's no music-service host to contradict it. YouTube
+    /// resolves to the `browser` provider (opened in the browser, since Fadeo can't conduct
+    /// it natively).
     private func detectedProvider(for text: String) -> DetectedLinkProvider? {
         if text.hasPrefix("spotify:") { return .known("spotify") }
         guard let url = URL(string: text), let host = url.host?.lowercased(),
@@ -375,13 +370,17 @@ struct SoundEditor: View {
         else { return nil }
         if host.contains("music.apple.com") { return .known("appleMusic") }
         if host.contains("open.spotify.com") { return .known("spotify") }
-        if host.contains("music.youtube.com") { return .unsupported("YouTube Music") }
-        if host.contains("youtube.com") || host == "youtu.be" { return .unsupported("YouTube") }
+        if host.contains("youtube.com") || host == "youtu.be" { return .known("browser") }
         return nil
     }
 
     private var shareLinkExplanation: String {
-        "A pasted share link opens directly in the \(externalProvider == "spotify" ? "Spotify" : "Music") app on this Mac, not a browser. If that app isn't installed, it opens in your browser instead. A single-song link repeats that song, since neither app lets us turn off its own autoplay/radio continuation."
+        switch externalProvider {
+        case "browser":
+            return "Opens this link in your default browser when the workspace activates (YouTube, YouTube Music, any web page). Fadeo can pause/resume it through the system's Now Playing controls, but can't set its volume."
+        default:
+            return "A pasted share link opens directly in the \(externalProvider == "spotify" ? "Spotify" : "Music") app on this Mac, not a browser. If that app isn't installed, it opens in your browser instead. A single-song link repeats that song, since neither app lets us turn off its own autoplay/radio continuation."
+        }
     }
 
     private func rebuildExternal(provider: String, playlist: String) {
