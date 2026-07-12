@@ -6,7 +6,6 @@ struct FadeoApp: App {
     @StateObject private var configStore: ConfigStore
     @StateObject private var controller: AppController
     @StateObject private var licenseManager = LicenseManager()
-    @StateObject private var softwareUpdater = SoftwareUpdater()
 
     init() {
         // One ConfigStore, shared by the controller and the UI.
@@ -21,7 +20,6 @@ struct FadeoApp: App {
                 .environmentObject(controller)
                 .environmentObject(configStore)
                 .environmentObject(licenseManager)
-                .environmentObject(softwareUpdater)
         }
         // .contentSize now that the shell is a deterministic HStack (not the old
         // NavigationSplitView whose buggy intrinsic sizing this used to fight): it makes

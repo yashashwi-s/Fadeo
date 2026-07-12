@@ -299,3 +299,107 @@ resources rather than muting them. When adding anything that runs periodically, 
 to "this should be push-based" and treat a polling loop as something to justify, not the
 default. See PLAN.md §11 ("the invisible in Activity Monitor contract") for the full list
 of techniques and the numeric ship gate.
+
+## Hard-won lessons (read before debugging UI/window issues)
+
+These are real mistakes made on this codebase/machine. They cost hours; don't repeat them.
+
+- **A third-party dependency can silently poison the whole window.** Symptom seen live:
+  the main window rendered and took mouse clicks, but exposed **zero accessibility** and its
+  `ScrollView`s would not scroll. Root cause was **Sparkle** — merely constructing
+  `SPUStandardUpdaterController` (eager OR deferred) breaks the window at the AppKit level on
+  the macOS 26/27 beta. It was removed (see PLAN.md §15). Before re-adding any updater/agent
+  library, retest that the window stays AX-alive.
+- **When a symptom survives several fixes, STOP and find the root cause — don't pile on
+  band-aids.** The scroll/layout bug got a `columnVisibility` change, a `SidebarState` menu
+  command, `windowResizability` flips, min-width tweaks, a whole `NavigationSplitView`→`HStack`
+  rewrite — none worked because none touched the real cause (Sparkle). One clean bisection
+  would have found it far sooner. This directly violated the "goal-driven, verify each step"
+  guideline below.
+- **The bisection that actually works here**: build a *minimal* SwiftUI app (one `Window` +
+  one `ScrollView`, same ad-hoc signing) as a control, confirm it behaves, then add Fadeo's
+  traits to it (or strip Fadeo down) one at a time until the symptom flips. And inspect the
+  window via the **Accessibility API** from a small `swift` script:
+  `AXUIElementCreateApplication(pid)` then read `AXWindows` / walk for `AXScrollArea`. A
+  healthy app shows ~19 attrs + its windows; an AX count of **0** means the window is broken,
+  not that your query is wrong (validate the query against Finder/Terminal first).
+- **NEVER drive the user's live app with fragile UI automation.** Blindly sending
+  System-Events keystrokes/clicks to the running app corrupted the user's real `config.yaml`
+  **twice** (silently added a time-window + weekday restriction to their Deep Work workspace;
+  wiped a saved sound). Use the `FADEO_*` env-var pane hooks + **read-only** inspection
+  (screenshots, the AX tree). If a live mutation is ever unavoidable, `cp` the config/prefs to
+  a backup first. Also: whatever is on screen can leak — a would-be demo screen-recording
+  nearly captured this very Claude Code session window.
+- **Synthetic scroll/resize is unreliable here.** `CGEvent` scroll-wheel posting did not move
+  even Finder in this environment, and `System Events` often can't address Fadeo's window
+  ("window 1 … invalid index") precisely *because* of an AX defect. Prefer AX-tree structural
+  checks (does an `AXScrollArea` with an enabled scrollbar exist?) and confirm interaction
+  with the user's real trackpad — treat a failed synthetic test as inconclusive, not as proof.
+- **Stale LaunchServices registrations accumulate.** `lsregister -dump | grep -i fadeo.app`
+  found ~14 registrations pointing at long-deleted build dirs. For a truly clean rebuild:
+  `make clean`, remove `~/Applications/Fadeo.app` + any DerivedData, `lsregister -u` each stale
+  path, then `make gen && make build && make install`.
+
+The user has appended general behavioral guidelines below (think before coding, simplicity
+first, surgical changes, goal-driven verification). **Weight them heavily** — the lessons
+above are mostly what happens when they're ignored.
+
+Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
+
+**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
+
+## 1. Think Before Coding
+
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+## 2. Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+## 3. Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+## 4. Goal-Driven Execution
+
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+```
+
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.

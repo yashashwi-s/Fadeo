@@ -11,9 +11,6 @@ options:
 packages:
   FadeoCore:
     path: Packages/FadeoCore
-  Sparkle:
-    url: https://github.com/sparkle-project/Sparkle
-    from: 2.6.4
 
 targets:
   Fadeo:
@@ -25,8 +22,6 @@ targets:
     dependencies:
       - package: FadeoCore
         product: FadeoCore
-      - package: Sparkle
-        product: Sparkle
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.fadeo.Fadeo
@@ -41,17 +36,9 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: Fadeo
         INFOPLIST_KEY_NSHumanReadableCopyright: "© 2026 Fadeo. GPLv3."
         INFOPLIST_KEY_NSAppleEventsUsageDescription: "Fadeo controls your music apps (like Spotify and Apple Music) to match your workflow."
-        # Sparkle auto-update. SUFeedURL uses GitHub's "latest" release alias so this
-        # never needs to change between releases -- it always resolves to whatever tag
-        # release.yml most recently published. SUPublicEDKey is the public half of the
-        # keypair from scripts/generate-sparkle-keys.swift; the private half lives at
-        # ~/.fadeo-secrets/sparkle-signing-key.txt and in the SPARKLE_PRIVATE_KEY CI
-        # secret, never in this repo. This is Sparkle's own tamper-evidence scheme,
-        # unrelated to Apple code signing/Developer ID -- it works fine ad-hoc signed.
-        INFOPLIST_KEY_SUFeedURL: "https://github.com/yashashwi-s/Fadeo/releases/latest/download/appcast.xml"
-        INFOPLIST_KEY_SUPublicEDKey: "W2pgF4QWAE9eVwtxgnRL6QIsdQb1EwiDxk/dOohuhOk="
-        INFOPLIST_KEY_SUEnableAutomaticChecks: YES
-        INFOPLIST_KEY_SUScheduledCheckInterval: "86400"
+        # NOTE: Sparkle auto-update was removed -- SPUStandardUpdaterController breaks the
+        # main window on macOS 26/27 beta (renders + clicks but zero accessibility and dead
+        # ScrollViews; confirmed by bisection). Revisit with a different updater integration.
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_HARDENED_RUNTIME: NO
         DEAD_CODE_STRIPPING: YES

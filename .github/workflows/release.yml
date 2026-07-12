@@ -95,22 +95,6 @@ jobs:
             -ov -format UDZO \
             dist/Fadeo.dmg
 
-      # Signs dist/Fadeo.app.zip with Sparkle's EdDSA scheme and emits an appcast.xml
-      # naming this exact tag's zip as the enclosure. SUFeedURL (project.yml) points at
-      # GitHub's "latest release" alias, so publishing this asset here is the entire
-      # deploy step -- no separate hosting. Skipped (not failed) if the secret isn't
-      # configured yet, so a Sparkle-less release still ships normally.
-      - name: Generate Sparkle appcast
-        if: ${{ env.SPARKLE_PRIVATE_KEY != '' }}
-        env:
-          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
-        run: |
-          VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" dist/Fadeo.app/Contents/Info.plist)
-          BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" dist/Fadeo.app/Contents/Info.plist)
-          ENCLOSURE_URL="https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/Fadeo.app.zip"
-          swift scripts/sign-appcast.swift dist/Fadeo.app.zip "$VERSION" "$BUILD" "$ENCLOSURE_URL" > dist/appcast.xml
-          cat dist/appcast.xml
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -121,4 +105,3 @@ jobs:
           files: |
             dist/Fadeo.app.zip
             dist/Fadeo.dmg
-            dist/appcast.xml

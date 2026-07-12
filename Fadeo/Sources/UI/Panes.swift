@@ -214,7 +214,6 @@ struct PreferencesPane: View {
 
 struct AboutPane: View {
     @EnvironmentObject var licenseManager: LicenseManager
-    @EnvironmentObject var softwareUpdater: SoftwareUpdater
     @State private var licenseKeyInput = ""
     @State private var showKeyEntry = false
 
@@ -244,26 +243,12 @@ struct AboutPane: View {
                 licenseSection
 
                 Divider().frame(width: 220).padding(.vertical, 6)
-                updateSection
-
-                Divider().frame(width: 220).padding(.vertical, 6)
                 feedbackSection
             }
             .frame(maxWidth: .infinity)
             .padding(30)
         }
         .navigationTitle("About")
-    }
-
-    private var updateSection: some View {
-        VStack(spacing: 6) {
-            Button("Check for Updates…") { softwareUpdater.checkForUpdates() }
-                .buttonStyle(.bordered)
-                .disabled(!softwareUpdater.canCheckForUpdates)
-            Toggle("Automatically check for updates", isOn: $softwareUpdater.automaticallyChecksForUpdates)
-                .toggleStyle(.checkbox)
-                .font(.caption)
-        }
     }
 
     private var feedbackSection: some View {
