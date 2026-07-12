@@ -33,19 +33,15 @@ enum Pane: String, CaseIterable, Identifiable {
 struct RootView: View {
     @EnvironmentObject var controller: AppController
     @EnvironmentObject var licenseManager: LicenseManager
+    // Owned by FadeoApp (not local @State) so the Window menu's "Show Sidebar" command --
+    // a hard reset to .all, not dependent on the toolbar toggle -- can reach the same
+    // value. See SidebarState.swift for why that second path exists.
+    @EnvironmentObject var sidebarState: SidebarState
     // Dev/screenshot-verification hook: FADEO_INITIAL_PANE=<rawValue> jumps straight to a
     // pane at launch without needing UI-click automation. Never set in the shipped app.
     @State private var selection: Pane = Pane(rawValue: ProcessInfo.processInfo.environment["FADEO_INITIAL_PANE"] ?? "") ?? .now
     @State private var showOnboarding = !OnboardingSheet.hasCompleted
     @State private var showNag = false
-    // A real @State, not .constant(.all): forcing NavigationSplitView's visibility to a
-    // constant while also stripping its only toggle button (an earlier "pin it open"
-    // attempt) left no way to recover once the sidebar collapsed by some other means
-    // (e.g. dragging the divider shut) -- and fighting the view with a non-settable
-    // binding is also the likely cause of a window-resize layout corruption reported
-    // live (scrolling breaking, stray content bleeding through at the window edge).
-    // A normal mutable binding plus the standard toggle is the well-tested path.
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
         content
@@ -60,7 +56,7 @@ struct RootView: View {
     }
 
     private var content: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
+        NavigationSplitView(columnVisibility: $sidebarState.visibility) {
             List(Pane.allCases, selection: $selection) { pane in
                 NavigationLink(value: pane) {
                     Label(pane.rawValue, systemImage: pane.systemImage)
