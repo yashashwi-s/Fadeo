@@ -56,7 +56,11 @@ struct SoundLibraryPane: View {
         .sheet(isPresented: $showAddSaved) {
             AddSavedSoundSheet { name, provider, link in
                 var cfg = config
-                let source = "external:\(provider):playlist:\(link)"
+                // A pasted link names its own service in its host; trust that over the picker
+                // so a Spotify link saved under "Apple Music" is not stored as a broken
+                // cross-provider source. Matches SoundEditor's commitLinkDraft behavior.
+                let resolved = detectedSavedProvider(for: link) ?? provider
+                let source = "external:\(resolved):playlist:\(link)"
                 cfg.savedSounds.append(SavedSound(name: name, source: source))
                 controller.configStore.save(cfg)
             }
@@ -156,6 +160,7 @@ private struct SavedSoundRow: View {
     private var providerLabel: String {
         if saved.source.hasPrefix("external:spotify") { return "Spotify" }
         if saved.source.hasPrefix("external:appleMusic") { return "Apple Music" }
+        if saved.source.hasPrefix("external:browser") { return "Browser" }
         if saved.source.hasPrefix("internal:file:") { return "File" }
         if saved.source.hasPrefix("internal:folder:") { return "Folder" }
         return "Other"
@@ -211,6 +216,7 @@ private struct AddSavedSoundSheet: View {
             Picker("App", selection: $provider) {
                 Text("Apple Music").tag("appleMusic")
                 Text("Spotify").tag("spotify")
+                Text("Browser").tag("browser")
             }
             .pickerStyle(.segmented).labelsHidden()
             TextField("Share link, playlist name, or spotify: URI", text: $link)
@@ -229,5 +235,19 @@ private struct AddSavedSoundSheet: View {
         .padding(20)
         .frame(width: 420)
     }
+}
+
+// Host-sniffs a pasted share link so a saved link is tagged with the service it actually
+// names, not whatever the picker happened to show. Mirrors SoundEditor.detectedProvider;
+// nil means "not a recognizable service link", so the picker choice stands.
+private func detectedSavedProvider(for text: String) -> String? {
+    if text.hasPrefix("spotify:") { return "spotify" }
+    guard let url = URL(string: text), let host = url.host?.lowercased(),
+          text.hasPrefix("http://") || text.hasPrefix("https://")
+    else { return nil }
+    if host.contains("music.apple.com") { return "appleMusic" }
+    if host.contains("open.spotify.com") { return "spotify" }
+    if host.contains("youtube.com") || host == "youtu.be" { return "browser" }
+    return nil
 }
 

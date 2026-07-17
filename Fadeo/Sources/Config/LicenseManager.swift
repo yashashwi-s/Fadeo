@@ -86,7 +86,25 @@ final class LicenseManager: ObservableObject {
         UserDefaults.standard.set(key, forKey: Self.licenseKeyDefaultsKey)
         status = .licensed(payload)
         licenseError = nil
+        // Free-giveaway keys have a slot in the "first 100" pool; tell the server this one
+        // was activated so its slot isn't reclaimed. Paid keys (no mustActivateBy) have no
+        // slot to protect, so they never ping.
+        if payload.mustActivateBy != nil { pingActivation(key) }
         return true
+    }
+
+    /// Best-effort, one-time, anonymous ping so the server leaves an activated giveaway key's
+    /// slot claimed (see the promo reclaim sweep). Sends only the key itself, which the user
+    /// already holds: no email, no usage, no personal data. Fire-and-forget, since activation
+    /// is fully offline and must never depend on this succeeding.
+    private func pingActivation(_ key: String) {
+        guard let url = URL(string: "https://puremac.yashashwi.me/api/fadeo-activate") else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["key": key])
+        request.timeoutInterval = 10
+        URLSession.shared.dataTask(with: request).resume()
     }
 
     var isLicensed: Bool {

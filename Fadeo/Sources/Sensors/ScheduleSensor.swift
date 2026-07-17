@@ -42,7 +42,11 @@ final class ScheduleSensor: Sensor {
         let t = DispatchSource.makeTimerSource(queue: .main)
         // One-shot to the next boundary, not a repeating tick, and a generous leeway
         // since this is a single infrequent wakeup, not a latency-sensitive one.
-        t.schedule(deadline: .now() + interval, leeway: .seconds(5))
+        // Wall clock, not mach time: a boundary is a wall-clock deadline, and on Macs
+        // where mach time pauses during sleep (Intel) a `deadline:` timer would slip by
+        // the whole sleep and cross boundaries hours late. A wall deadline that passed
+        // during sleep fires promptly on wake instead.
+        t.schedule(wallDeadline: .now() + interval, leeway: .seconds(5))
         t.setEventHandler { [weak self] in
             guard let self else { return }
             self.emit?(ContextPatch(apply: { $0.localTime = Date() }, label: "schedule boundary"))

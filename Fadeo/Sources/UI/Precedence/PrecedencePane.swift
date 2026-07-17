@@ -74,6 +74,13 @@ struct PrecedencePane: View {
                     .onMove { indices, offset in
                         var chain = settingsBinding.wrappedValue.tiebreak
                         chain.move(fromOffsets: indices, toOffset: offset)
+                        // stableId is the deterministic final tiebreaker; anything after it
+                        // in the chain is unreachable, so keep it pinned last to match the
+                        // "not reorderable" label on its row.
+                        if let i = chain.firstIndex(of: .stableId), i != chain.count - 1 {
+                            chain.remove(at: i)
+                            chain.append(.stableId)
+                        }
                         settingsBinding.wrappedValue.tiebreak = chain
                     }
                 }

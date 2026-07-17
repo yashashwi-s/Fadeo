@@ -119,21 +119,30 @@ final class AppController: ObservableObject {
             .store(in: &cancellables)
 
         engine.onPlaybackEnded = { [weak self] reason in
-            guard let self, self.activeActuator == .internalEngine else { return }
-            self.activeActuator = .none
-            switch reason {
-            case .finished:
-                // Keep the source with finished=true: the reconciler must not restart a
-                // completed play-once queue on the next context tick. Cleared on workspace switch.
-                self.audioState = AudioState(source: self.audioState.source,
-                                             volume: self.audioState.volume,
-                                             playing: false, finished: true)
-                self.audioIssue = nil
-            case .failed(let why):
-                self.audioState = .silent   // a later real event may retry; no synchronous retry here
-                self.audioIssue = why
+            // This can fire synchronously from inside engine.execute(.start/.resume) when
+            // a source has no playable files, i.e. mid-applyAudio, BEFORE applyAudio's own
+            // post-execute writes (activeActuator = destination, audioState = playing).
+            // Handled inline, the cleanup would either be dropped (the guard sees the
+            // pre-start actuator) or immediately clobbered by those writes, leaving
+            // audioState claiming playing:true on a torn-down engine. Hop one main-queue
+            // turn so applyAudio always finishes first and this cleanup lands last.
+            DispatchQueue.main.async {
+                guard let self, self.activeActuator == .internalEngine else { return }
+                self.activeActuator = .none
+                switch reason {
+                case .finished:
+                    // Keep the source with finished=true: the reconciler must not restart a
+                    // completed play-once queue on the next context tick. Cleared on workspace switch.
+                    self.audioState = AudioState(source: self.audioState.source,
+                                                 volume: self.audioState.volume,
+                                                 playing: false, finished: true)
+                    self.audioIssue = nil
+                case .failed(let why):
+                    self.audioState = .silent   // a later real event may retry; no synchronous retry here
+                    self.audioIssue = why
+                }
+                self.updateAudioStatus()
             }
-            self.updateAudioStatus()
         }
         external.onPlaybackIssue = { [weak self] msg in self?.audioIssue = msg }
 
@@ -208,7 +217,13 @@ final class AppController: ObservableObject {
         var positionSeconds: Double?
         if activeActuator == .internalEngine {
             guard let qi = engine.currentQueueIndex, let pos = engine.currentPlaybackPosition() else {
-                bookmarkStore.clear()
+                // A paused player node reports no playerTime, so a quit while paused can't
+                // read a position here. The bookmark captured when the pause began already
+                // holds the exact spot; keep it rather than wiping it on the way out.
+                let existing = bookmarkStore.bookmark
+                if !(audioState.paused && existing?.workspaceID == workspaceID && existing?.source == source) {
+                    bookmarkStore.clear()
+                }
                 return
             }
             queueIndex = qi
@@ -368,6 +383,25 @@ final class AppController: ObservableObject {
     }
 
     // MARK: Manual playback controls (menu bar)
+
+    /// User-initiated "I'm done for now." Banks the active workspace's elapsed time and marks
+    /// a session boundary so average-session stats reflect real work stretches, drops any
+    /// resume bookmark so the next play starts songs from the beginning rather than mid-track,
+    /// and stops audio, holding it silent via the automation-pause path. Turning automation
+    /// back on begins a fresh session.
+    func endSession() {
+        if let id = usageTrackedWorkspaceID {
+            usageStore.recordElapsed(workspaceID: id, seconds: Date().timeIntervalSince(usageTrackedSince))
+            usageStore.endSession()
+        }
+        usageTrackedWorkspaceID = nil
+        usageTrackedSince = Date()
+        bookmarkStore.clear()
+        // Reuse the tested stop-and-hold path (it tears the engine down, so the next start
+        // begins at track 1 / second 0). No-op if automation was already paused.
+        if !automationPaused { automationPaused = true }
+    }
+
 
     /// Toggle a manual pause/resume. Both directions act directly on whatever's currently
     /// held (never via `evaluate()`): pausing while playing, or resuming while paused —
@@ -530,7 +564,11 @@ final class AppController: ObservableObject {
             lastSwitchAt = Date()
             audioState.finished = false
         }
-        recordUsageIfWorkspaceChanged(newWorkspaceID: d.activeWorkspace)
+        // resolverState, not d.activeWorkspace: a keepCurrent fallback carries a nil
+        // workspace while audio keeps playing under the current one. Attributing by the
+        // decision would stop the usage clock mid-play and count a phantom activation
+        // when the workspace re-affirms. Identical for every other path.
+        recordUsageIfWorkspaceChanged(newWorkspaceID: resolverState.activeWorkspace)
         applyAudio(d)
     }
 

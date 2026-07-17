@@ -35,7 +35,7 @@ struct RootView: View {
     @EnvironmentObject var licenseManager: LicenseManager
     // Dev/screenshot-verification hook: FADEO_INITIAL_PANE=<rawValue> jumps straight to a
     // pane at launch without needing UI-click automation. Never set in the shipped app.
-    @State private var selection: Pane? = Pane(rawValue: ProcessInfo.processInfo.environment["FADEO_INITIAL_PANE"] ?? "")
+    @State private var selection: Pane? = Pane(rawValue: ProcessInfo.processInfo.environment["FADEO_INITIAL_PANE"] ?? "") ?? .now
     @State private var showOnboarding = !OnboardingSheet.hasCompleted
     @State private var showNag = false
 

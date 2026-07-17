@@ -24,6 +24,9 @@ struct MenuBarContent: View {
             Divider()
 
             VStack(spacing: 1) {
+                MenuRow(icon: "stop.circle", title: "End Session") {
+                    controller.endSession()
+                }
                 MenuRow(icon: "macwindow", title: "Open Fadeo") {
                     NSApp.setActivationPolicy(.regular)
                     NSApp.activate(ignoringOtherApps: true)

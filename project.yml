@@ -26,8 +26,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.fadeo.Fadeo
         PRODUCT_NAME: Fadeo
-        MARKETING_VERSION: "0.3.0"
-        CURRENT_PROJECT_VERSION: "4"
+        MARKETING_VERSION: "0.4.0"
+        CURRENT_PROJECT_VERSION: "5"
         # App layer stays Swift 5 language mode for M0; FadeoCore is full Swift 6.
         # We migrate the app to Swift 6 concurrency during the M5 polish pass.
         SWIFT_VERSION: "5.0"

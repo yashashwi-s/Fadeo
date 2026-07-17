@@ -66,8 +66,19 @@ final class InternalEngine {
 
     enum EndReason { case finished, failed(String) }
     /// Fired on main whenever playback ends on its own (not via a stop/crossfade command):
-    /// a failed start, an unplayable queue, or a repeat-off queue running out.
+    /// a failed start, an unplayable queue, or a repeat-off queue running out. Always
+    /// delivered asynchronously — see `notifyPlaybackEnded`.
     var onPlaybackEnded: ((EndReason) -> Void)?
+
+    /// Failure paths inside `execute()` reach here synchronously, mid-command; firing the
+    /// callback inline would let AppController's post-execute optimistic state mirror
+    /// overwrite the handler's corrections, leaving its audioState claiming `playing` on a
+    /// torn-down engine. One async hop guarantees the handler runs after the command's
+    /// caller has finished — matching the natural track-completion path, which already
+    /// arrives via an async hop from the schedule's completion handler.
+    private func notifyPlaybackEnded(_ reason: EndReason) {
+        DispatchQueue.main.async { [weak self] in self?.onPlaybackEnded?(reason) }
+    }
 
     // Includes movie containers (mp4/m4v/mov): AVAudioFile reads their audio track fine,
     // verified against ground truth, so folders of screen recordings or music videos
@@ -111,8 +122,18 @@ final class InternalEngine {
     // MARK: Command execution (called on main from the AppController)
 
     func execute(_ command: AudioCommand, order: PlaybackOrder = .sequential, repeatMode: RepeatMode = .all) {
-        self.order = order
-        self.repeatMode = repeatMode
+        // Only queue-(re)building commands retune these: a pause/resume/stop from a caller
+        // that doesn't pass them (the menu bar's manual pause/play, the paused-teardown
+        // timer) would otherwise reset a repeat-off queue back to the `.all` default
+        // mid-session. A resume continues the session with the order/repeat it started
+        // with — it never re-resolves the queue.
+        switch command {
+        case .start, .crossfade:
+            self.order = order
+            self.repeatMode = repeatMode
+        case .none, .setVolume, .pause, .resume, .stop:
+            break
+        }
         switch command {
         case .none:
             break
@@ -141,7 +162,11 @@ final class InternalEngine {
         case .preset:
             stopFilePlaybackImmediate()
             configureNoiseIfNeeded()
-            startEngineIfNeeded()
+            guard startEngineIfNeeded() else {
+                teardownAfterEnd()
+                notifyPlaybackEnded(.failed("audio engine failed to start"))
+                return
+            }
             renderer.kind = NoiseRenderer.Kind(source: source)
             renderer.setRamp(to: calibratedGain(volume, source: source), ms: fadeMs, sampleRate: sampleRate)
             activeKind = .preset
@@ -158,7 +183,7 @@ final class InternalEngine {
             guard !urls.isEmpty else {
                 NSLog("Fadeo InternalEngine: no playable files for source \(source)")
                 teardownAfterEnd()
-                onPlaybackEnded?(.failed("no playable files in \(source)"))
+                notifyPlaybackEnded(.failed("no playable files in \(source)"))
                 return
             }
             queue = order == .shuffle ? urls.shuffled() : urls
@@ -171,7 +196,11 @@ final class InternalEngine {
             let canResume = resume != nil && order != .shuffle && queue.indices.contains(resume!.queueIndex)
             queueIndex = canResume ? resume!.queueIndex : 0
             configureFileIfNeeded()
-            startEngineIfNeeded()
+            guard startEngineIfNeeded() else {
+                teardownAfterEnd()
+                notifyPlaybackEnded(.failed("audio engine failed to start"))
+                return
+            }
             activeKind = .files
             state = AudioState(source: source, volume: volume, playing: true)
             playCurrentQueueItem(fadeInMs: fadeMs, startSeconds: canResume ? resume!.positionSeconds : 0)
@@ -521,13 +550,21 @@ final class InternalEngine {
         fileConfigured = true
     }
 
-    private func startEngineIfNeeded() {
-        guard !engine.isRunning else { return }
+    /// Returns whether the engine is actually running afterwards. Callers on the file
+    /// path MUST check this before `playerNode.play()` — play() on a node whose engine
+    /// isn't running raises an Objective-C exception Swift cannot catch (a crash), and
+    /// on the noise path proceeding anyway would leave `state` claiming `playing` while
+    /// nothing renders.
+    @discardableResult
+    private func startEngineIfNeeded() -> Bool {
+        guard !engine.isRunning else { return true }
         engine.prepare()
         do {
             try engine.start()
+            return true
         } catch {
             NSLog("Fadeo InternalEngine: engine start failed: \(error.localizedDescription)")
+            return false
         }
     }
 

@@ -65,7 +65,7 @@ struct NagSheet: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
 
-            Button("I already have a license key") { showKeyEntry = true }
+            Button("I already have a license key") { licenseManager.licenseError = nil; showKeyEntry = true }
                 .buttonStyle(.plain).font(.callout).foregroundStyle(.secondary)
 
             Divider().padding(.vertical, 6)
@@ -119,7 +119,7 @@ struct NagSheet: View {
             Divider()
 
             Toggle("Also share anonymous usage data", isOn: $diagnosticsOptIn)
-            Text("A coarse summary only: session count, days used, workspace count, switches, and total active time. Never workspace or app names, or file paths. There's no server to send it to yet, so this doesn't transmit anything today — it just marks your preference for when that exists.")
+            Text("A coarse summary only: session count, days used, workspace count, switches, and total active time. Never workspace or app names, or file paths. Sent at most once a day while this is on.")
                 .font(.caption2).foregroundStyle(.secondary)
 
             HStack {

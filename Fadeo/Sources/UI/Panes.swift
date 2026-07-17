@@ -62,7 +62,7 @@ struct NowPane: View {
     private var audio: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 10) {
-                Image(systemName: controller.audioStatus == "silent" ? "speaker.slash" : "speaker.wave.2")
+                Image(systemName: controller.audioStatus.hasPrefix("playing") ? "speaker.wave.2" : "speaker.slash")
                     .foregroundStyle(.secondary)
                     .frame(width: 20)
                 Text(controller.audioStatus).font(.callout.weight(.medium))
@@ -393,7 +393,7 @@ struct AboutPane: View {
                             if let url = URL(string: "https://puremac.yashashwi.me/fadeo") { NSWorkspace.shared.open(url) }
                         }
                         .buttonStyle(.borderedProminent)
-                        Button("Enter License Key") { showKeyEntry = true }
+                        Button("Enter License Key") { licenseManager.licenseError = nil; showKeyEntry = true }
                     }
                 }
             }

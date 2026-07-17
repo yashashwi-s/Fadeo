@@ -41,6 +41,16 @@ final class UsageStore: ObservableObject {
         scheduleSave()
     }
 
+    /// Marks a session boundary: subsequent active time counts toward a fresh session, so
+    /// average-session-length stays meaningful for a long-running menu-bar app instead of
+    /// averaging over the whole daemon uptime. Distinct from the once-per-launch increment
+    /// in init; this is the user explicitly ending a work stretch.
+    func endSession() {
+        stats.sessionCount += 1
+        dirty = true
+        scheduleSave()
+    }
+
     /// Coalesces frequent updates into an occasional write rather than hitting disk on
     /// every app-focus change (which can fire many times a minute).
     private func scheduleSave() {

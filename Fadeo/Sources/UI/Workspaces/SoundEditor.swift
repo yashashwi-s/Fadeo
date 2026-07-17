@@ -264,7 +264,7 @@ struct SoundEditor: View {
     private var playlistPicker: some View {
         Group {
             if allPlaylists.isEmpty {
-                Text("No playlists yet. Create one in Sound Library.")
+                Text("No playlists available. Pick another source above.")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
                 Picker("Playlist", selection: Binding(
@@ -458,7 +458,7 @@ struct SoundEditor: View {
                           systemImage: isPreviewingThis ? "stop.fill" : "play.fill")
                 }
                 if isPreviewingThis {
-                    Text("Auditioning — the live workspace audio resumes when you stop.")
+                    Text("Auditioning. The live workspace audio resumes when you stop.")
                         .font(.caption2).foregroundStyle(.tertiary)
                 }
                 Spacer()
