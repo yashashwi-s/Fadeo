@@ -1,0 +1,41 @@
+Title: I built a free, open-source macOS app that automatically plays and pauses the right audio for whatever you are doing
+
+Body:
+Hey r/macapps,
+
+I have tried a lot of ambient-sound and focus apps over the years, and they all shared the same problem: they are manual. I still had to remember to start the noise, remember to pause it for a call, and remember to switch it when I moved to a different task. The audio never actually knew what I was doing.
+
+So I built Fadeo. It is a native, lightweight, free, and open-source menu bar app that plays, pauses, and switches your audio based on context, and then shows you exactly why it made each decision.
+
+Here is what makes it different:
+
+1. It reacts to real context, not a manual toggle. Fadeo watches the frontmost app, which desktop Space you are on, whether your camera or mic is in use (a meeting), your Focus mode, and the time of day. You build "workspaces" with rules, and it resolves which one wins. Open your editor and your focus sound starts. A call begins and it pauses on its own. Move to your admin desktop and it switches. You never press play.
+
+2. It tells you why. Most automation is a black box. Fadeo has a Now screen that shows the active workspace, what it is doing to your audio, and the reason it won ("Deep Work is the only match", or "Reading won on specificity"). If it ever does something you did not expect, you can see the logic.
+
+3. It does not lock you into its own library. This is the big one versus subscription focus apps. Fadeo can synthesize ambient textures on device (brown, pink, white noise, rain, ocean, wind, fan, with no audio files shipped), or it can conduct your Spotify or Apple Music, including a specific playlist. Your sound stays yours.
+
+4. It never touches your system volume. Each workspace has its own level, so Fadeo mixing brown noise at 60 percent has nothing to do with your master volume. Your volume keys and Control Center keep working exactly as before.
+
+5. It is genuinely efficient. The whole thing is event driven with no polling loops, so at idle it sits near 0 percent CPU. Meeting detection observes camera and mic usage through the system, which means it needs no camera or microphone permission prompt.
+
+How it compares to what is out there:
+
+Noizio, A Soft Murmur, myNoise: lovely ambient sound apps, but manual. You pick a sound and set a volume. They do not know when you started a meeting or switched desktops, and they do not bring your own music.
+
+Brain.fm, Endel: polished, but they are subscription services built around their own generated music. You cannot point them at your Spotify playlist, they do not switch based on your frontmost app, and they are not free or open source.
+
+Krisp, mic-mute tools: those mute your microphone in a call. Fadeo is the other side of that: it pauses what you are listening to when a call starts, then resumes it after.
+
+macOS Focus filters: useful, but coarse. They cannot start a specific playlist, fade between sources, or reason about the frontmost app and Space the way a rules engine can.
+
+Doing it by hand in Spotify or Apple Music: this is what most of us actually do, and it is exactly the chore Fadeo removes.
+
+A note for the developers here: the part that decides which rule wins is a pure Swift package with zero dependencies and no OS calls, so it is fully unit tested without ever running the app or touching a Mac API. The OS-facing layer (a private CoreGraphics Space read, MediaRemote transport commands, CoreMediaIO and CoreAudio listeners for camera and mic, a Focus read, a single next-boundary timer for schedules) stays thin behind a small sensor protocol. That split is why the behavior is predictable instead of flaky.
+
+It is completely free and open source (GPLv3). There is an optional pay-what-you-want lifetime license ($2 minimum) that only removes a small occasional reminder, and the first 100 are free, but nothing is ever gated. Honest heads up: I do not have an Apple Developer ID yet, so it is ad-hoc signed and the first launch needs a right-click then Open past Gatekeeper.
+
+Download, a short demo video, and screenshots: https://puremac.yashashwi.me/puremac/fadeo
+Source: https://github.com/yashashwi-s/Fadeo
+
+macOS 14 and up. Let me know what you think or what you would want it to react to next. I am actively building this and would love the feedback.

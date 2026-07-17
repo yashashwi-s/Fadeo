@@ -280,15 +280,34 @@ would be padding). Gated on `OnboardingSheet.hasCompleted` (a `UserDefaults` fla
 `fadeo.onboarding.completed`); `AppDelegate` keeps the initial window open only on that
 first launch, `RootView` presents the sheet.
 
-**Project status at the M5 milestone: the core app is feature-complete.** M0 through M4
-plus M5's permissions/onboarding and energy dashboard are done (see PLAN.md §17). By
-explicit user decision, monetization (licensing, trial, soft nag, diagnostics),
-notifications, and packaging/notarization are deferred to a later stage — no Apple
-Developer ID exists yet, and licensing is substantial enough surface that it isn't worth
-building before the core product is fully proven. Don't start on licensing/notifications/
-notarization work without the user explicitly asking for it again; it was intentionally
-paused, not forgotten. The app icon/logo is also being redesigned by the user personally —
-don't regenerate `assets/appicon/` or `AppIcon.appiconset` programmatically.
+**Project status: the core app is feature-complete and the monetization/growth layer is
+built.** M0 through M5 are done (see PLAN.md §17). Since then, the previously-deferred layer
+shipped: Ed25519 licensing (`FadeoCore/License.swift` + `Config/LicenseManager.swift`) with a
+"first 100 free" giveaway, a pay-what-you-want checkout path, opt-in diagnostics that now DO
+upload a coarse, non-identifying summary to `https://puremac.yashashwi.me/api/fadeo-diagnostics`
+(the "no server to send it to yet" language that used to be in the UI is gone; do not
+reintroduce it), local notifications (`Support/Notifier.swift`, opt-out), a daily GitHub-release
+update check (`Support/UpdateChecker.swift`), in-app rating + feedback (`Support/Feedback.swift`),
+and an "End Session" menu control (`AppController.endSession`) that marks a usage-session
+boundary, clears the resume bookmark, and stops audio via the automation-pause path. The
+companion site + backend live in a separate repo at `/Users/yashashwisinghania/portfolio`
+(Next.js on Vercel, `puremac.yashashwi.me/puremac/fadeo`): product page with an interactive
+Web-Audio demo, the license/giveaway/subscribe/feedback API routes, and an admin diagnostics
+dashboard. Promo-key reclaim is built: an unactivated giveaway key frees its slot back into the pool
+after 7 days, driven by a minimal one-time activation ping (`LicenseManager.pingActivation`
+posts only the key to `/api/fadeo-activate`, which verifies its signature server-side; the
+sweep lives in `portfolio/lib/fadeo-promo.js`). Still genuinely deferred: packaging and
+notarization (no Apple Developer ID yet, so the app stays ad-hoc signed). The app icon/logo is being redesigned by the user
+personally, so do not regenerate `assets/appicon/` or `AppIcon.appiconset` programmatically.
+
+**Taking pane screenshots without driving the live app (safe, verified this works):** launch
+the installed binary directly with the dev env hooks, `FADEO_OPEN_MAIN_ON_LAUNCH=1
+FADEO_INITIAL_PANE="<pane rawValue>"`, then capture the window by its CGWindowID
+(`CGWindowListCopyWindowInfo` to find it, `screencapture -x -o -l<id>`). This is read-only, never
+sends a keystroke or click into the UI, and leaves `config.yaml` byte-identical (verified against
+a backup). It is the sanctioned alternative to the fragile UI automation that corrupted the
+config twice, and it is what the marketing screenshots in `portfolio/public/puremac/fadeo/` were
+made with.
 
 ## Efficiency is a hard constraint, not a nice-to-have
 

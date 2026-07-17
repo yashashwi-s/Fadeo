@@ -1,0 +1,51 @@
+# Fadeo v1.0.0 - First public release
+
+Fadeo plays, pauses, and switches your Mac's audio automatically based on what you are doing,
+and shows you why. This is the first public build. It is free and open source (GPLv3).
+
+## 🎧 What it does
+
+### Context-aware switching
+- Reacts to the frontmost app, the desktop Space you are on, whether your camera or mic is in
+  use (a meeting), your Focus mode, and the time of day.
+- Build "workspaces" with rules. When several match, an ordered tiebreak chain (stickiness,
+  specificity, priority, stable order) resolves a single winner, and you control the order.
+- Mark an app as "weak" so it keeps a workspace playing but never yanks you into it, which is
+  how shared apps like Slack or Notes stop hijacking your sound.
+- Override workspaces (for example Meetings) pre-empt everything the moment they match.
+
+### It tells you why
+- The Now screen shows the active workspace, what it is doing to your audio, the live context
+  (frontmost app, Space, meeting, Focus), and the exact reason a workspace won.
+
+### Your sound, or its own
+- On-device ambient textures synthesized in real time: brown, pink, and white noise, plus
+  rain, ocean, wind, and fan. No audio files shipped, no looping seams.
+- Or conduct Spotify and Apple Music, including a specific playlist, with per-source volume.
+- Bring your own files, folders, or a curated local playlist, with order and repeat controls.
+
+### Built to disappear
+- Event driven with no polling, so it sits near 0% CPU at idle. Sensors only run when a rule
+  needs them. Meeting detection needs no camera or microphone permission prompt.
+- Never touches your system volume. Each workspace has its own level.
+- Tunable fades, crossfades, enter and exit delays, and minimum dwell, so the audio never
+  thrashes on rapid app switching.
+- Resume across quit: internal files and Apple Music or Spotify pick up where they left off.
+- Usage screen with time and switches per workspace, and a fully opt-in, coarse diagnostics
+  summary if you want to help.
+
+## 🐛 Known limitations (being honest)
+- No Apple Developer ID yet, so the app is ad-hoc signed. The first launch needs a right-click
+  then Open to clear Gatekeeper.
+- Detecting the desktop Space index uses a private API that can change between macOS releases;
+  if it ever breaks, app-based rules keep working and it degrades to "space changed, index
+  unknown".
+
+## 🎁 Launch
+- The first 100 people get a free lifetime license from the site. It is free to use regardless;
+  an optional pay-what-you-want license ($2 minimum) only clears a small occasional reminder,
+  and nothing is ever gated.
+
+Download: https://puremac.yashashwi.me/puremac/fadeo
+Source: https://github.com/yashashwi-s/Fadeo
+macOS 14 and up.
